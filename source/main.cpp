@@ -81,7 +81,7 @@ int main()
     int width = 1024;
     int height = 768;
 
-    auto window = SDL_CreateWindow("WebGPU Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN);
+    auto window = SDL_CreateWindow("WebGPU Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
     WGPUInstanceDescriptor instanceDescriptor;
     instanceDescriptor.nextInChain = nullptr;
@@ -236,13 +236,28 @@ int main()
         WGPUSurfaceTexture surfaceTexture;
 
         auto getTextureStart = std::chrono::high_resolution_clock::now();
+
         wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
+
+        if (surfaceTexture.status == WGPUSurfaceGetCurrentTextureStatus_Outdated)
+        {
+            SDL_GetWindowSize(window, &width, &height);
+            std::cout << "Resized to " << width << "x" << height << std::endl;
+
+            surfaceConfiguration.width = width;
+            surfaceConfiguration.height = height;
+            wgpuSurfaceConfigure(surface, &surfaceConfiguration);
+
+            wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
+        }
+
         if (surfaceTexture.status == WGPUSurfaceGetCurrentTextureStatus_Timeout)
         {
             std::cout << "Timeout" << std::endl;
             ++frame;
             continue;
         }
+
         auto getTextureEnd = std::chrono::high_resolution_clock::now();
         std::cout << "Waited " << (std::chrono::duration_cast<std::chrono::duration<double>>(getTextureEnd - getTextureStart).count() * 1000.0) << " ms for the swapchain image" << std::endl;
 
