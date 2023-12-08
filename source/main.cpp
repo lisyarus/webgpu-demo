@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <vector>
+#include <chrono>
 
 WGPUSurface SDL_WGPU_CreateSurface(WGPUInstance instance, SDL_Window * window)
 {
@@ -234,6 +235,7 @@ int main()
 
         WGPUSurfaceTexture surfaceTexture;
 
+        auto getTextureStart = std::chrono::high_resolution_clock::now();
         wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
         if (surfaceTexture.status == WGPUSurfaceGetCurrentTextureStatus_Timeout)
         {
@@ -241,6 +243,8 @@ int main()
             ++frame;
             continue;
         }
+        auto getTextureEnd = std::chrono::high_resolution_clock::now();
+        std::cout << "Waited " << (std::chrono::duration_cast<std::chrono::duration<double>>(getTextureEnd - getTextureStart).count() * 1000.0) << " ms for the swapchain image" << std::endl;
 
         if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_Success)
             throw std::runtime_error("Can't get surface texture: " + std::to_string(surfaceTexture.status));
