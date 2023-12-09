@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <cstdint>
+#include <chrono>
 
 struct Vertex
 {
@@ -165,14 +166,6 @@ int main()
 
     wgpuQueueWriteBuffer(application.queue(), vertexBuffer, 0, vertices.data(), vertices.size() * sizeof(vertices[0]));
 
-    float viewProjectionMatrix[16] =
-    {
-        1.f, 0.f, 0.f, 0.f,
-        0.f, 1.f, 0.f, 0.f,
-        0.f, 0.f, 1.f, 0.f,
-        0.f, 0.f, 0.f, 1.f,
-    };
-
     WGPUBufferDescriptor uniformBufferDescriptor;
     uniformBufferDescriptor.nextInChain = nullptr;
     uniformBufferDescriptor.label = nullptr;
@@ -181,8 +174,6 @@ int main()
     uniformBufferDescriptor.mappedAtCreation = false;
 
     WGPUBuffer uniformBuffer = wgpuDeviceCreateBuffer(application.device(), &uniformBufferDescriptor);
-
-    wgpuQueueWriteBuffer(application.queue(), uniformBuffer, 0, viewProjectionMatrix, 64);
 
     WGPUBindGroupEntry bindGroupEntry;
     bindGroupEntry.nextInChain = nullptr;
@@ -203,6 +194,9 @@ int main()
     WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(application.device(), &bindGroupDescriptor);
 
     int frameId = 0;
+    float time = 0.f;
+
+    auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
     for (bool running = true; running;)
     {
@@ -229,6 +223,20 @@ int main()
             ++frameId;
             continue;
         }
+
+        auto thisFrameStart = std::chrono::high_resolution_clock::now();
+        float const dt = std::chrono::duration_cast<std::chrono::duration<float>>(thisFrameStart - lastFrameStart).count();
+        time += dt;
+        lastFrameStart = thisFrameStart;
+
+        float viewProjectionMatrix[16] =
+        {
+             std::cos(time), std::sin(time), 0.f, 0.f,
+            -std::sin(time), std::cos(time), 0.f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            0.f, 0.f, 0.f, 1.f,
+        };
+        wgpuQueueWriteBuffer(application.queue(), uniformBuffer, 0, viewProjectionMatrix, 64);
 
         WGPUCommandEncoderDescriptor commandEncoderDescriptor;
         commandEncoderDescriptor.nextInChain = nullptr;
