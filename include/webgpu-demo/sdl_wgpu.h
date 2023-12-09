@@ -1,6 +1,10 @@
 #pragma once
 
+#ifdef __APPLE__
+#include <SDL_video.h>
+#else
 #include <SDL2/SDL_video.h>
+#endif
 #include <webgpu.h>
 
 #ifdef __cplusplus

@@ -1,6 +1,10 @@
 #include <webgpu-demo/sdl_wgpu.h>
 
+#ifdef __APPLE__
+#include <SDL_syswm.h>
+#else
 #include <SDL2/SDL_syswm.h>
+#endif
 
 WGPUSurface SDL_WGPU_CreateSurface(WGPUInstance instance, SDL_Window * window)
 {
