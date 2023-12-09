@@ -16,6 +16,8 @@ struct Vertex
 static const char shaderCode[] =
 R"(
 
+@group(0) @binding(0) var<uniform> viewProjection: mat4x4f;
+
 struct VertexInput {
     @builtin(vertex_index) index : u32,
     @location(0) position : vec2f,
@@ -29,7 +31,7 @@ struct VertexOutput {
 
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    return VertexOutput(vec4f(in.position, 0.0, 1.0), in.color);
+    return VertexOutput(viewProjection * vec4f(in.position, 0.0, 1.0), in.color);
 }
 
 @fragment
@@ -56,11 +58,38 @@ int main()
 
     WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(application.device(), &shaderModuleDescriptor);
 
+    WGPUBindGroupLayoutEntry bindGroupLayoutEntry[1];
+    bindGroupLayoutEntry[0].nextInChain = nullptr;
+    bindGroupLayoutEntry[0].binding = 0;
+    bindGroupLayoutEntry[0].visibility = WGPUShaderStage_Vertex;
+    bindGroupLayoutEntry[0].buffer.nextInChain = nullptr;
+    bindGroupLayoutEntry[0].buffer.type = WGPUBufferBindingType_Uniform;
+    bindGroupLayoutEntry[0].buffer.hasDynamicOffset = false;
+    bindGroupLayoutEntry[0].buffer.minBindingSize = 64;
+    bindGroupLayoutEntry[0].sampler.nextInChain = nullptr;
+    bindGroupLayoutEntry[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    bindGroupLayoutEntry[0].texture.nextInChain = nullptr;
+    bindGroupLayoutEntry[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    bindGroupLayoutEntry[0].texture.multisampled = false;
+    bindGroupLayoutEntry[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    bindGroupLayoutEntry[0].storageTexture.nextInChain = nullptr;
+    bindGroupLayoutEntry[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    bindGroupLayoutEntry[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    bindGroupLayoutEntry[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor bindGroupLayoutDescriptor;
+    bindGroupLayoutDescriptor.nextInChain = nullptr;
+    bindGroupLayoutDescriptor.label = nullptr;
+    bindGroupLayoutDescriptor.entryCount = 1;
+    bindGroupLayoutDescriptor.entries = bindGroupLayoutEntry;
+
+    WGPUBindGroupLayout bindGroupLayout = wgpuDeviceCreateBindGroupLayout(application.device(), &bindGroupLayoutDescriptor);
+
     WGPUPipelineLayoutDescriptor pipelineLayoutDescriptor;
     pipelineLayoutDescriptor.nextInChain = nullptr;
     pipelineLayoutDescriptor.label = nullptr;
-    pipelineLayoutDescriptor.bindGroupLayoutCount = 0;
-    pipelineLayoutDescriptor.bindGroupLayouts = nullptr;
+    pipelineLayoutDescriptor.bindGroupLayoutCount = 1;
+    pipelineLayoutDescriptor.bindGroupLayouts = &bindGroupLayout;
 
     WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(application.device(), &pipelineLayoutDescriptor);
 
@@ -136,6 +165,43 @@ int main()
 
     wgpuQueueWriteBuffer(application.queue(), vertexBuffer, 0, vertices.data(), vertices.size() * sizeof(vertices[0]));
 
+    float viewProjectionMatrix[16] =
+    {
+        1.f, 0.f, 0.f, 0.f,
+        0.f, 1.f, 0.f, 0.f,
+        0.f, 0.f, 1.f, 0.f,
+        0.f, 0.f, 0.f, 1.f,
+    };
+
+    WGPUBufferDescriptor uniformBufferDescriptor;
+    uniformBufferDescriptor.nextInChain = nullptr;
+    uniformBufferDescriptor.label = nullptr;
+    uniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+    uniformBufferDescriptor.size = 64;
+    uniformBufferDescriptor.mappedAtCreation = false;
+
+    WGPUBuffer uniformBuffer = wgpuDeviceCreateBuffer(application.device(), &uniformBufferDescriptor);
+
+    wgpuQueueWriteBuffer(application.queue(), uniformBuffer, 0, viewProjectionMatrix, 64);
+
+    WGPUBindGroupEntry bindGroupEntry;
+    bindGroupEntry.nextInChain = nullptr;
+    bindGroupEntry.binding = 0;
+    bindGroupEntry.buffer = uniformBuffer;
+    bindGroupEntry.offset = 0;
+    bindGroupEntry.size = 64;
+    bindGroupEntry.sampler = nullptr;
+    bindGroupEntry.textureView = nullptr;
+
+    WGPUBindGroupDescriptor bindGroupDescriptor;
+    bindGroupDescriptor.nextInChain = nullptr;
+    bindGroupDescriptor.label = nullptr;
+    bindGroupDescriptor.layout = bindGroupLayout;
+    bindGroupDescriptor.entryCount = 1;
+    bindGroupDescriptor.entries = &bindGroupEntry;
+
+    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(application.device(), &bindGroupDescriptor);
+
     int frameId = 0;
 
     for (bool running = true; running;)
@@ -190,6 +256,7 @@ int main()
         WGPURenderPassEncoder renderPassEncoder = wgpuCommandEncoderBeginRenderPass(commandEncoder, &renderPassDescriptor);
 
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
+        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, 0, vertices.size() * sizeof(vertices[0]));
         wgpuRenderPassEncoderDraw(renderPassEncoder, 3, 1, 0, 0);
 
