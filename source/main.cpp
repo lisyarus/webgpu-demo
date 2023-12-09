@@ -8,22 +8,27 @@
 static const char shaderCode[] =
 R"(
 
+struct VertexOutput {
+  @builtin(position) position : vec4f,
+  @location(0) color : vec4f,
+};
+
 @vertex
-fn vertexMain(@builtin(vertex_index) in_vertex_index : u32) -> @builtin(position) vec4f {
+fn vertexMain(@builtin(vertex_index) in_vertex_index : u32) -> VertexOutput {
     if (in_vertex_index == 0u) {
-        return vec4f(-0.5, -0.5, 0.0, 1.0);
+        return VertexOutput(vec4f(-0.5, -0.5, 0.0, 1.0), vec4f(1.0, 0.0, 0.0, 1.0));
     } else if (in_vertex_index == 1u) {
-        return vec4f( 0.5, -0.5, 0.0, 1.0);
+        return VertexOutput(vec4f( 0.5, -0.5, 0.0, 1.0), vec4f(0.0, 1.0, 0.0, 1.0));
     } else if (in_vertex_index == 2u) {
-        return vec4f( 0.0,  0.5, 0.0, 1.0);
+        return VertexOutput(vec4f( 0.0,  0.5, 0.0, 1.0), vec4f(0.0, 0.0, 1.0, 1.0));
     } else {
-        return vec4f( 0.0,  0.0, 0.0, 1.0);
+        return VertexOutput(vec4f( 0.0,  0.0, 0.0, 1.0), vec4f(0.0));
     }
 }
 
 @fragment
-fn fragmentMain() -> @location(0) vec4f {
-    return vec4f(0.0, 0.4, 1.0, 1.0);
+fn fragmentMain(vertex : VertexOutput) -> @location(0) vec4f {
+    return pow(vertex.color, vec4f(1.0 / 2.2));
 }
 
 )";
