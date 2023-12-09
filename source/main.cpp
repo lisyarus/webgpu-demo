@@ -34,7 +34,7 @@ WGPUSurface SDL_WGPU_CreateSurface(WGPUInstance instance, SDL_Window * window)
 #endif
 
 #ifdef SDL_VIDEO_DRIVER_WAYLAND
-    case SDL_SYSWM_X11:
+    case SDL_SYSWM_WAYLAND:
         {
             WGPUSurfaceDescriptorFromWaylandSurface surfaceDescriptorFromWaylandSurface;
             surfaceDescriptorFromWaylandSurface.chain.next = nullptr;
