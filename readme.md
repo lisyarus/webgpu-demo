@@ -23,7 +23,7 @@ Then, follow the usual steps for building something with CMake:
 * In the build directory, run `cmake <path-to-webgpu-demo-source> -DWGPU_NATIVE_ROOT=<path-to-unpacked-wgpu-native>`
 * Build the project: `cmake --build .`
 
-Note that building for MacOS doesn't fully work right now due to a [bug in wgpu-native distribution](https://github.com/gfx-rs/wgpu-native/issues/329). I'll update these notes as soon as it gets fixed.
+Note that in case of MacOS, linking dynamic wgpu-native library (`libwgpu_native.dylib`) doesn't fully work right now due to a [bug](https://github.com/gfx-rs/wgpu-native/issues/329). The static version (`libwgpu_native.a`) works, though, so you can simply delete the dynamic library so that CMake uses the static one instead.
 
 # SDL2-wgpu
 
