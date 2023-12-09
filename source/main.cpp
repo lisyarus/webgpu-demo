@@ -49,7 +49,7 @@ int main()
         renderPassColorAttachment.resolveTarget = nullptr;
         renderPassColorAttachment.loadOp = WGPULoadOp_Clear;
         renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
-        renderPassColorAttachment.clearValue = {1.0, 0.0, 1.0, 1.0};
+        renderPassColorAttachment.clearValue = {0.8, 0.9, 1.0, 1.0};
 
         WGPURenderPassDescriptor renderPassDescriptor;
         renderPassDescriptor.nextInChain = nullptr;
