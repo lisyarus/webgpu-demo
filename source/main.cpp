@@ -5,10 +5,12 @@
 
 #include <iostream>
 #include <vector>
+#include <cstdint>
 
 struct Vertex
 {
     float x, y;
+    std::uint32_t color;
 };
 
 static const char shaderCode[] =
@@ -17,6 +19,7 @@ R"(
 struct VertexInput {
     @builtin(vertex_index) index : u32,
     @location(0) position : vec2f,
+    @location(1) color : vec4f,
 }
 
 struct VertexOutput {
@@ -26,7 +29,7 @@ struct VertexOutput {
 
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    return VertexOutput(vec4f(in.position, 0.0, 1.0), vec4f(1.0, 0.0, 0.0, 1.0));
+    return VertexOutput(vec4f(in.position, 0.0, 1.0), in.color);
 }
 
 @fragment
@@ -76,15 +79,18 @@ int main()
     fragmentState.targetCount = 1;
     fragmentState.targets = &colorTargetState;
 
-    WGPUVertexAttribute attributes[1];
+    WGPUVertexAttribute attributes[2];
     attributes[0].format = WGPUVertexFormat_Float32x2;
     attributes[0].offset = 0;
     attributes[0].shaderLocation = 0;
+    attributes[1].format = WGPUVertexFormat_Unorm8x4;
+    attributes[1].offset = 8;
+    attributes[1].shaderLocation = 1;
 
     WGPUVertexBufferLayout vertexBufferLayout;
     vertexBufferLayout.arrayStride = sizeof(Vertex);
     vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
-    vertexBufferLayout.attributeCount = 1;
+    vertexBufferLayout.attributeCount = 2;
     vertexBufferLayout.attributes = attributes;
 
     WGPURenderPipelineDescriptor renderPipelineDescriptor;
@@ -114,9 +120,9 @@ int main()
 
     std::vector<Vertex> vertices
     {
-        {-0.5f, -0.5f},
-        { 0.5f, -0.5f},
-        { 0.0f,  0.5f},
+        {-0.5f, -0.5f, 0xff0000ffu},
+        { 0.5f, -0.5f, 0xff00ff00u},
+        { 0.0f,  0.5f, 0xffff0000u},
     };
 
     WGPUBufferDescriptor vertexBufferDescriptor;
