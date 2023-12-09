@@ -133,6 +133,17 @@ Application::Application()
     resize(width_, height_);
 
     queue_ = wgpuDeviceGetQueue(device_);
+
+    wgpuAdapterRelease(adapter);
+    wgpuInstanceRelease(instance);
+}
+
+Application::~Application()
+{
+    wgpuQueueRelease(queue_);
+    wgpuDeviceRelease(device_);
+    wgpuSurfaceRelease(surface_);
+    SDL_DestroyWindow(window_);
 }
 
 WGPUTextureView Application::nextSwapchainView()

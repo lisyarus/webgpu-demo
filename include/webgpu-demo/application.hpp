@@ -13,6 +13,7 @@
 struct Application
 {
     Application();
+    ~Application();
 
     SDL_Window * window() const { return window_; }
 
