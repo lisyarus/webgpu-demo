@@ -23,6 +23,7 @@ target_link_libraries(webgpu-demo
 
 target_include_directories(webgpu-demo PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
+	"${CMAKE_CURRENT_SOURCE_DIR}/glm"
 )
 
 if(APPLE)
