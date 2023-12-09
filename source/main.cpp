@@ -5,9 +5,94 @@
 
 #include <iostream>
 
+static const char shaderCode[] =
+R"(
+
+@vertex
+fn vertexMain(@builtin(vertex_index) in_vertex_index : u32) -> @builtin(position) vec4f {
+    if (in_vertex_index == 0u) {
+        return vec4f(-0.5, -0.5, 0.0, 1.0);
+    } else if (in_vertex_index == 1u) {
+        return vec4f( 0.5, -0.5, 0.0, 1.0);
+    } else if (in_vertex_index == 2u) {
+        return vec4f( 0.0,  0.5, 0.0, 1.0);
+    } else {
+        return vec4f( 0.0,  0.0, 0.0, 1.0);
+    }
+}
+
+@fragment
+fn fragmentMain() -> @location(0) vec4f {
+    return vec4f(0.0, 0.4, 1.0, 1.0);
+}
+
+)";
+
 int main()
 {
     Application application;
+
+    WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;
+    shaderModuleWGSLDescriptor.chain.next = nullptr;
+    shaderModuleWGSLDescriptor.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
+    shaderModuleWGSLDescriptor.code = shaderCode;
+
+    WGPUShaderModuleDescriptor shaderModuleDescriptor;
+    shaderModuleDescriptor.nextInChain = &shaderModuleWGSLDescriptor.chain;
+    shaderModuleDescriptor.label = nullptr;
+    shaderModuleDescriptor.hintCount = 0;
+    shaderModuleDescriptor.hints = nullptr;
+
+    WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(application.device(), &shaderModuleDescriptor);
+
+    WGPUPipelineLayoutDescriptor pipelineLayoutDescriptor;
+    pipelineLayoutDescriptor.nextInChain = nullptr;
+    pipelineLayoutDescriptor.label = nullptr;
+    pipelineLayoutDescriptor.bindGroupLayoutCount = 0;
+    pipelineLayoutDescriptor.bindGroupLayouts = nullptr;
+
+    WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(application.device(), &pipelineLayoutDescriptor);
+
+    WGPUColorTargetState colorTargetState;
+    colorTargetState.nextInChain = nullptr;
+    colorTargetState.format = application.surfaceFormat();
+    colorTargetState.blend = nullptr;
+    colorTargetState.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState;
+    fragmentState.nextInChain = nullptr;
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = "fragmentMain";
+    fragmentState.constantCount = 0;
+    fragmentState.constants = nullptr;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTargetState;
+
+    WGPURenderPipelineDescriptor renderPipelineDescriptor;
+    renderPipelineDescriptor.nextInChain = nullptr;
+    renderPipelineDescriptor.label = nullptr;
+    renderPipelineDescriptor.layout = pipelineLayout;
+
+    renderPipelineDescriptor.nextInChain = nullptr;
+    renderPipelineDescriptor.vertex.module = shaderModule;
+    renderPipelineDescriptor.vertex.entryPoint = "vertexMain";
+    renderPipelineDescriptor.vertex.constantCount = 0;
+    renderPipelineDescriptor.vertex.constants = nullptr;
+    renderPipelineDescriptor.vertex.bufferCount = 0;
+    renderPipelineDescriptor.vertex.buffers = nullptr;
+    renderPipelineDescriptor.primitive.nextInChain = nullptr;
+    renderPipelineDescriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    renderPipelineDescriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+    renderPipelineDescriptor.primitive.frontFace = WGPUFrontFace_CCW;
+    renderPipelineDescriptor.primitive.cullMode = WGPUCullMode_Back;
+    renderPipelineDescriptor.depthStencil = nullptr;
+    renderPipelineDescriptor.multisample.nextInChain = nullptr;
+    renderPipelineDescriptor.multisample.count = 1;
+    renderPipelineDescriptor.multisample.mask = -1;
+    renderPipelineDescriptor.multisample.alphaToCoverageEnabled = false;
+    renderPipelineDescriptor.fragment = &fragmentState;
+
+    WGPURenderPipeline renderPipeline = wgpuDeviceCreateRenderPipeline(application.device(), &renderPipelineDescriptor);
 
     int frameId = 0;
 
@@ -61,6 +146,10 @@ int main()
         renderPassDescriptor.timestampWrites = nullptr;
 
         WGPURenderPassEncoder renderPassEncoder = wgpuCommandEncoderBeginRenderPass(commandEncoder, &renderPassDescriptor);
+
+        wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
+        wgpuRenderPassEncoderDraw(renderPassEncoder, 3, 1, 0, 0);
+
         wgpuRenderPassEncoderEnd(renderPassEncoder);
 
         wgpuTextureViewRelease(surfaceTextureView);
