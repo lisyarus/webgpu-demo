@@ -28,10 +28,15 @@ struct Application
     int width() const { return width_; }
     int height() const { return height_; }
 
+    // Must to be called whenever the window is resized
     void resize(int width, int height);
 
+    // Returns null if the request timed out
+    // Throws on error
+    // The returned texture view needs to be released after rendering to it
     WGPUTextureView nextSwapchainView();
 
+    // Must be called after rendering each frame
     void present();
 
     std::optional<SDL_Event> poll();
