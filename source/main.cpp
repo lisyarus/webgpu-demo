@@ -239,6 +239,8 @@ int main()
     glm::vec3 cameraPosition = glm::vec3(0.0, 0.0, 5.0);
     float cameraXAngle = 0.f;
     float cameraYAngle = 0.f;
+    float cameraXAngleTarget = 0.f;
+    float cameraYAngleTarget = 0.f;
 
     float cameraSensitivity = 0.003f;
     float cameraSpeed = 3.f;
@@ -268,8 +270,8 @@ int main()
             }
             break;
         case SDL_MOUSEMOTION:
-            cameraXAngle += event->motion.xrel * cameraSensitivity;
-            cameraYAngle += event->motion.yrel * cameraSensitivity;
+            cameraXAngleTarget += event->motion.xrel * cameraSensitivity;
+            cameraYAngleTarget += event->motion.yrel * cameraSensitivity;
             break;
         case SDL_KEYDOWN:
             keysDown.insert(event->key.keysym.scancode);
@@ -290,6 +292,9 @@ int main()
         float const dt = std::chrono::duration_cast<std::chrono::duration<float>>(thisFrameStart - lastFrameStart).count();
         time += dt;
         lastFrameStart = thisFrameStart;
+
+        cameraXAngle += (cameraXAngleTarget - cameraXAngle) * (1.f - std::exp(- dt * 20.f));
+        cameraYAngle += (cameraYAngleTarget - cameraYAngle) * (1.f - std::exp(- dt * 20.f));
 
         glm::vec3 cameraForward = glm::vec3(
             std::cos(cameraYAngle) * std::sin(cameraXAngle), -std::sin(cameraYAngle), - std::cos(cameraYAngle) * std::cos(cameraXAngle)
