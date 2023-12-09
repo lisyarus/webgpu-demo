@@ -11,10 +11,11 @@
 #include <cstdint>
 #include <chrono>
 #include <unordered_set>
+#include <random>
 
 struct Vertex
 {
-    float x, y;
+    glm::vec3 position;
     std::uint32_t color;
 };
 
@@ -25,7 +26,7 @@ R"(
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
-    @location(0) position : vec2f,
+    @location(0) position : vec3f,
     @location(1) color : vec4f,
 }
 
@@ -36,12 +37,12 @@ struct VertexOutput {
 
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    return VertexOutput(viewProjection * vec4f(in.position, 0.0, 1.0), in.color);
+    return VertexOutput(viewProjection * vec4f(in.position, 1.0), in.color);
 }
 
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
-    return pow(in.color, vec4f(1.0 / 2.2));
+    return in.color;
 }
 
 )";
@@ -114,11 +115,11 @@ int main()
     fragmentState.targets = &colorTargetState;
 
     WGPUVertexAttribute attributes[2];
-    attributes[0].format = WGPUVertexFormat_Float32x2;
+    attributes[0].format = WGPUVertexFormat_Float32x3;
     attributes[0].offset = 0;
     attributes[0].shaderLocation = 0;
     attributes[1].format = WGPUVertexFormat_Unorm8x4;
-    attributes[1].offset = 8;
+    attributes[1].offset = 12;
     attributes[1].shaderLocation = 1;
 
     WGPUVertexBufferLayout vertexBufferLayout;
@@ -152,12 +153,39 @@ int main()
 
     WGPURenderPipeline renderPipeline = wgpuDeviceCreateRenderPipeline(application.device(), &renderPipelineDescriptor);
 
-    std::vector<Vertex> vertices
+    std::vector<Vertex> vertices;
+
     {
-        {-0.5f, -0.5f, 0xff0000ffu},
-        { 0.5f, -0.5f, 0xff00ff00u},
-        { 0.0f,  0.5f, 0xffff0000u},
-    };
+        float const X = 0.525731112119133606f;
+        float const Z = 0.850650808352039932f;
+
+        glm::vec3 const icosahedronVertices[12]
+        {
+            {-X, 0.0, Z}, {X, 0.0, Z}, {-X, 0.0, -Z}, {X, 0.0, -Z},
+            {0.0, Z, X}, {0.0, Z, -X}, {0.0, -Z, X}, {0.0, -Z, -X},
+            {Z, X, 0.0}, {-Z, X, 0.0}, {Z, -X, 0.0}, {-Z, -X, 0.0}
+        };
+
+        std::uint32_t const icosahedronTriangles[20][3]
+        {
+            {0,4,1}, {0,9,4}, {9,5,4}, {4,5,8}, {4,8,1},
+            {8,10,1}, {8,3,10}, {5,3,8}, {5,2,3}, {2,7,3},
+            {7,10,3}, {7,6,10}, {7,11,6}, {11,0,6}, {0,1,6},
+            {6,1,10}, {9,0,11}, {9,11,2}, {9,2,5}, {7,2,11}
+        };
+
+        std::default_random_engine rng;
+        std::uniform_int_distribution<std::uint32_t> randomColor;
+
+        for (auto const & triangle : icosahedronTriangles)
+        {
+            auto color = randomColor(rng);
+
+            vertices.push_back(Vertex{icosahedronVertices[triangle[0]], color});
+            vertices.push_back(Vertex{icosahedronVertices[triangle[2]], color});
+            vertices.push_back(Vertex{icosahedronVertices[triangle[1]], color});
+        }
+    }
 
     WGPUBufferDescriptor vertexBufferDescriptor;
     vertexBufferDescriptor.nextInChain = nullptr;
@@ -306,7 +334,7 @@ int main()
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, 0, vertices.size() * sizeof(vertices[0]));
-        wgpuRenderPassEncoderDraw(renderPassEncoder, 3, 1, 0, 0);
+        wgpuRenderPassEncoderDraw(renderPassEncoder, vertices.size(), 1, 0, 0);
 
         wgpuRenderPassEncoderEnd(renderPassEncoder);
 
