@@ -4,31 +4,34 @@
 #include <webgpu-demo/application.hpp>
 
 #include <iostream>
+#include <vector>
+
+struct Vertex
+{
+    float x, y;
+};
 
 static const char shaderCode[] =
 R"(
 
+struct VertexInput {
+    @builtin(vertex_index) index : u32,
+    @location(0) position : vec2f,
+}
+
 struct VertexOutput {
-  @builtin(position) position : vec4f,
-  @location(0) color : vec4f,
-};
+    @builtin(position) position : vec4f,
+    @location(0) color : vec4f,
+}
 
 @vertex
-fn vertexMain(@builtin(vertex_index) in_vertex_index : u32) -> VertexOutput {
-    if (in_vertex_index == 0u) {
-        return VertexOutput(vec4f(-0.5, -0.5, 0.0, 1.0), vec4f(1.0, 0.0, 0.0, 1.0));
-    } else if (in_vertex_index == 1u) {
-        return VertexOutput(vec4f( 0.5, -0.5, 0.0, 1.0), vec4f(0.0, 1.0, 0.0, 1.0));
-    } else if (in_vertex_index == 2u) {
-        return VertexOutput(vec4f( 0.0,  0.5, 0.0, 1.0), vec4f(0.0, 0.0, 1.0, 1.0));
-    } else {
-        return VertexOutput(vec4f( 0.0,  0.0, 0.0, 1.0), vec4f(0.0));
-    }
+fn vertexMain(in : VertexInput) -> VertexOutput {
+    return VertexOutput(vec4f(in.position, 0.0, 1.0), vec4f(1.0, 0.0, 0.0, 1.0));
 }
 
 @fragment
-fn fragmentMain(vertex : VertexOutput) -> @location(0) vec4f {
-    return pow(vertex.color, vec4f(1.0 / 2.2));
+fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
+    return pow(in.color, vec4f(1.0 / 2.2));
 }
 
 )";
@@ -73,18 +76,28 @@ int main()
     fragmentState.targetCount = 1;
     fragmentState.targets = &colorTargetState;
 
+    WGPUVertexAttribute attributes[1];
+    attributes[0].format = WGPUVertexFormat_Float32x2;
+    attributes[0].offset = 0;
+    attributes[0].shaderLocation = 0;
+
+    WGPUVertexBufferLayout vertexBufferLayout;
+    vertexBufferLayout.arrayStride = sizeof(Vertex);
+    vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+    vertexBufferLayout.attributeCount = 1;
+    vertexBufferLayout.attributes = attributes;
+
     WGPURenderPipelineDescriptor renderPipelineDescriptor;
     renderPipelineDescriptor.nextInChain = nullptr;
     renderPipelineDescriptor.label = nullptr;
     renderPipelineDescriptor.layout = pipelineLayout;
-
     renderPipelineDescriptor.nextInChain = nullptr;
     renderPipelineDescriptor.vertex.module = shaderModule;
     renderPipelineDescriptor.vertex.entryPoint = "vertexMain";
     renderPipelineDescriptor.vertex.constantCount = 0;
     renderPipelineDescriptor.vertex.constants = nullptr;
-    renderPipelineDescriptor.vertex.bufferCount = 0;
-    renderPipelineDescriptor.vertex.buffers = nullptr;
+    renderPipelineDescriptor.vertex.bufferCount = 1;
+    renderPipelineDescriptor.vertex.buffers = &vertexBufferLayout;
     renderPipelineDescriptor.primitive.nextInChain = nullptr;
     renderPipelineDescriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
     renderPipelineDescriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
@@ -98,6 +111,24 @@ int main()
     renderPipelineDescriptor.fragment = &fragmentState;
 
     WGPURenderPipeline renderPipeline = wgpuDeviceCreateRenderPipeline(application.device(), &renderPipelineDescriptor);
+
+    std::vector<Vertex> vertices
+    {
+        {-0.5f, -0.5f},
+        { 0.5f, -0.5f},
+        { 0.0f,  0.5f},
+    };
+
+    WGPUBufferDescriptor vertexBufferDescriptor;
+    vertexBufferDescriptor.nextInChain = nullptr;
+    vertexBufferDescriptor.label = nullptr;
+    vertexBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+    vertexBufferDescriptor.size = vertices.size() * sizeof(vertices[0]);
+    vertexBufferDescriptor.mappedAtCreation = false;
+
+    WGPUBuffer vertexBuffer = wgpuDeviceCreateBuffer(application.device(), &vertexBufferDescriptor);
+
+    wgpuQueueWriteBuffer(application.queue(), vertexBuffer, 0, vertices.data(), vertices.size() * sizeof(vertices[0]));
 
     int frameId = 0;
 
@@ -153,6 +184,7 @@ int main()
         WGPURenderPassEncoder renderPassEncoder = wgpuCommandEncoderBeginRenderPass(commandEncoder, &renderPassDescriptor);
 
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
+        wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, 0, vertices.size() * sizeof(vertices[0]));
         wgpuRenderPassEncoderDraw(renderPassEncoder, 3, 1, 0, 0);
 
         wgpuRenderPassEncoderEnd(renderPassEncoder);
