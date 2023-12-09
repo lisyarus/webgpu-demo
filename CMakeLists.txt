@@ -3,6 +3,8 @@ project(webgpu-demo)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+set(CMAKE_CXX_STANDARD 20)
+
 find_package(SDL2 REQUIRED)
 find_package(wgpu-native REQUIRED)
 
@@ -15,11 +17,10 @@ add_executable(webgpu-demo
 )
 
 target_link_libraries(webgpu-demo
-	SDL2
+	SDL2::SDL2
 	wgpu-native
 )
 
 target_include_directories(webgpu-demo PUBLIC
-	${WGPU_NATIVE_INCLUDE_DIRECTORY}
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
