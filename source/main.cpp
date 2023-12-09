@@ -11,12 +11,12 @@
 #include <cstdint>
 #include <chrono>
 #include <unordered_set>
-#include <random>
 
 struct Vertex
 {
     glm::vec3 position;
     std::uint32_t color;
+    glm::vec3 normal;
 };
 
 static const char shaderCode[] =
@@ -28,21 +28,23 @@ struct VertexInput {
     @builtin(vertex_index) index : u32,
     @location(0) position : vec3f,
     @location(1) color : vec4f,
+    @location(2) normal : vec3f,
 }
 
 struct VertexOutput {
     @builtin(position) position : vec4f,
     @location(0) color : vec4f,
+    @location(1) normal : vec3f,
 }
 
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    return VertexOutput(viewProjection * vec4f(in.position, 1.0), in.color);
+    return VertexOutput(viewProjection * vec4f(in.position, 1.0), in.color, in.normal);
 }
 
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
-    return in.color;
+    return in.color * (0.5 + 0.5 * dot(normalize(in.normal), normalize(vec3f(1.0, 2.0, 3.0))));
 }
 
 )";
@@ -114,18 +116,21 @@ int main()
     fragmentState.targetCount = 1;
     fragmentState.targets = &colorTargetState;
 
-    WGPUVertexAttribute attributes[2];
+    WGPUVertexAttribute attributes[3];
     attributes[0].format = WGPUVertexFormat_Float32x3;
     attributes[0].offset = 0;
     attributes[0].shaderLocation = 0;
     attributes[1].format = WGPUVertexFormat_Unorm8x4;
     attributes[1].offset = 12;
     attributes[1].shaderLocation = 1;
+    attributes[2].format = WGPUVertexFormat_Float32x3;
+    attributes[2].offset = 16;
+    attributes[2].shaderLocation = 2;
 
     WGPUVertexBufferLayout vertexBufferLayout;
     vertexBufferLayout.arrayStride = sizeof(Vertex);
     vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
-    vertexBufferLayout.attributeCount = 2;
+    vertexBufferLayout.attributeCount = 3;
     vertexBufferLayout.attributes = attributes;
 
     WGPURenderPipelineDescriptor renderPipelineDescriptor;
@@ -174,16 +179,22 @@ int main()
             {6,1,10}, {9,0,11}, {9,11,2}, {9,2,5}, {7,2,11}
         };
 
-        std::default_random_engine rng;
-        std::uniform_int_distribution<std::uint32_t> randomColor;
-
         for (auto const & triangle : icosahedronTriangles)
         {
-            auto color = randomColor(rng);
+            std::uint32_t color = 0xffff3fffu;
 
-            vertices.push_back(Vertex{icosahedronVertices[triangle[0]], color});
-            vertices.push_back(Vertex{icosahedronVertices[triangle[2]], color});
-            vertices.push_back(Vertex{icosahedronVertices[triangle[1]], color});
+            glm::vec3 triangleVertices[3]
+            {
+                icosahedronVertices[triangle[0]],
+                icosahedronVertices[triangle[2]],
+                icosahedronVertices[triangle[1]],
+            };
+
+            glm::vec3 normal = glm::normalize(glm::cross(triangleVertices[1] - triangleVertices[0], triangleVertices[2] - triangleVertices[0]));
+
+            vertices.push_back(Vertex{triangleVertices[0], color, normal});
+            vertices.push_back(Vertex{triangleVertices[1], color, normal});
+            vertices.push_back(Vertex{triangleVertices[2], color, normal});
         }
     }
 
