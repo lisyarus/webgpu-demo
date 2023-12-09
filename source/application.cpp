@@ -25,8 +25,15 @@ Application::Application()
     requestAdapterOptions.nextInChain = nullptr;
     requestAdapterOptions.compatibleSurface = surface_;
     requestAdapterOptions.powerPreference = WGPUPowerPreference_HighPerformance;
-    requestAdapterOptions.backendType = WGPUBackendType_Vulkan;
     requestAdapterOptions.forceFallbackAdapter = false;
+
+#if defined(__APPLE__)
+    requestAdapterOptions.backendType = WGPUBackendType_Metal;
+#elif defined(_WIN32)
+    requestAdapterOptions.backendType = WGPUBackendType_D3D12;
+#else
+    requestAdapterOptions.backendType = WGPUBackendType_Vulkan;
+#endif
 
     WGPUAdapter adapter = nullptr;
 

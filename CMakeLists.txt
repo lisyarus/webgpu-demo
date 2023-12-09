@@ -24,3 +24,12 @@ target_link_libraries(webgpu-demo
 target_include_directories(webgpu-demo PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+
+if(APPLE)
+	set_source_files_properties("source/sdl_wgpu.c" PROPERTIES COMPILE_FLAGS "-x objective-c")
+	target_link_libraries(webgpu-demo
+		"-framework QuartzCore"
+		"-framework Cocoa"
+		"-framework Metal"
+	)
+endif()

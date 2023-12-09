@@ -6,6 +6,12 @@
 #include <SDL2/SDL_syswm.h>
 #endif
 
+#ifdef SDL_VIDEO_DRIVER_COCOA
+#include <Foundation/Foundation.h>
+#include <QuartzCore/CAMetalLayer.h>
+#include <Cocoa/Cocoa.h>
+#endif
+
 WGPUSurface SDL_WGPU_CreateSurface(WGPUInstance instance, SDL_Window * window)
 {
     SDL_SysWMinfo info;
@@ -65,7 +71,27 @@ WGPUSurface SDL_WGPU_CreateSurface(WGPUInstance instance, SDL_Window * window)
         }
 #endif
 
-        // TODO: support MacOS
+#ifdef SDL_VIDEO_DRIVER_COCOA
+    case SDL_SYSWM_COCOA:
+        {
+            NSWindow * nsWindow = info.info.cocoa.window;
+            [nsWindow.contentView setWantsLayer : YES];
+            id metalLayer = [CAMetalLayer layer];
+            [nsWindow.contentView setLayer : metalLayer];
+
+            WGPUSurfaceDescriptorFromMetalLayer surfaceDescriptorFromMetalLayer;
+            surfaceDescriptorFromMetalLayer.chain.next = 0;
+            surfaceDescriptorFromMetalLayer.chain.sType = WGPUSType_SurfaceDescriptorFromMetalLayer;
+            surfaceDescriptorFromMetalLayer.layer = metalLayer;
+
+            WGPUSurfaceDescriptor surfaceDescriptor;
+            surfaceDescriptor.label = 0;
+            surfaceDescriptor.nextInChain = (const WGPUChainedStruct*)&surfaceDescriptorFromMetalLayer;
+
+            return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
+        }
+#endif
+
     default:
         return 0;
     }
