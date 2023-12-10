@@ -47,8 +47,9 @@ struct Material {
 @group(1) @binding(0) var<uniform> model: mat4x4f;
 
 @group(2) @binding(0) var<uniform> material : Material;
-@group(2) @binding(1) var baseColorTexture: texture_2d<f32>;
-@group(2) @binding(2) var textureSampler: sampler;
+@group(2) @binding(1) var textureSampler: sampler;
+@group(2) @binding(2) var baseColorTexture: texture_2d<f32>;
+@group(2) @binding(3) var normalTexture: texture_2d<f32>;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -84,9 +85,16 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         discard;
     }
 
+    var tbn = mat3x3f();
+    tbn[2] = normalize(in.normal);
+    tbn[0] = normalize(in.tangent.xyz - tbn[2] * dot(in.tangent.xyz, tbn[2]));
+    tbn[1] = cross(tbn[2], tbn[0]) * in.tangent.w;
+
+    let normal = tbn * normalize(2.0 * textureSample(normalTexture, textureSampler, in.texcoord).rgb - vec3(1.0));
+
     let lightDirection = normalize(vec3f(1.0, 2.0, 3.0));
 
-    let lightness = 0.5 + 0.5 * dot(lightDirection, normalize(in.normal));
+    let lightness = 0.5 + 0.5 * dot(lightDirection, normal);
 
     return vec4f(baseColorSample.rgb * lightness, 1.0);
 }
@@ -108,7 +116,6 @@ struct Material
 
     glm::vec3 emissiveFactor;
     WGPUTextureView emissiveTextureView;
-
 };
 
 struct RenderObject
@@ -311,7 +318,7 @@ int main()
     modelBindGroupLayoutDescriptor.entryCount = 1;
     modelBindGroupLayoutDescriptor.entries = modelBindGroupLayoutEntry;
 
-    WGPUBindGroupLayoutEntry materialBindGroupLayoutEntries[3];
+    WGPUBindGroupLayoutEntry materialBindGroupLayoutEntries[4];
 
     materialBindGroupLayoutEntries[0].nextInChain = nullptr;
     materialBindGroupLayoutEntries[0].binding = 0;
@@ -339,11 +346,11 @@ int main()
     materialBindGroupLayoutEntries[1].buffer.hasDynamicOffset = false;
     materialBindGroupLayoutEntries[1].buffer.minBindingSize = 0;
     materialBindGroupLayoutEntries[1].sampler.nextInChain = nullptr;
-    materialBindGroupLayoutEntries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    materialBindGroupLayoutEntries[1].sampler.type = WGPUSamplerBindingType_Filtering;
     materialBindGroupLayoutEntries[1].texture.nextInChain = nullptr;
-    materialBindGroupLayoutEntries[1].texture.sampleType = WGPUTextureSampleType_Float;
+    materialBindGroupLayoutEntries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
     materialBindGroupLayoutEntries[1].texture.multisampled = false;
-    materialBindGroupLayoutEntries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+    materialBindGroupLayoutEntries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
     materialBindGroupLayoutEntries[1].storageTexture.nextInChain = nullptr;
     materialBindGroupLayoutEntries[1].storageTexture.access = WGPUStorageTextureAccess_Undefined;
     materialBindGroupLayoutEntries[1].storageTexture.format = WGPUTextureFormat_Undefined;
@@ -357,20 +364,38 @@ int main()
     materialBindGroupLayoutEntries[2].buffer.hasDynamicOffset = false;
     materialBindGroupLayoutEntries[2].buffer.minBindingSize = 0;
     materialBindGroupLayoutEntries[2].sampler.nextInChain = nullptr;
-    materialBindGroupLayoutEntries[2].sampler.type = WGPUSamplerBindingType_Filtering;
+    materialBindGroupLayoutEntries[2].sampler.type = WGPUSamplerBindingType_Undefined;
     materialBindGroupLayoutEntries[2].texture.nextInChain = nullptr;
-    materialBindGroupLayoutEntries[2].texture.sampleType = WGPUTextureSampleType_Undefined;
+    materialBindGroupLayoutEntries[2].texture.sampleType = WGPUTextureSampleType_Float;
     materialBindGroupLayoutEntries[2].texture.multisampled = false;
-    materialBindGroupLayoutEntries[2].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    materialBindGroupLayoutEntries[2].texture.viewDimension = WGPUTextureViewDimension_2D;
     materialBindGroupLayoutEntries[2].storageTexture.nextInChain = nullptr;
     materialBindGroupLayoutEntries[2].storageTexture.access = WGPUStorageTextureAccess_Undefined;
     materialBindGroupLayoutEntries[2].storageTexture.format = WGPUTextureFormat_Undefined;
     materialBindGroupLayoutEntries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
+    materialBindGroupLayoutEntries[3].nextInChain = nullptr;
+    materialBindGroupLayoutEntries[3].binding = 3;
+    materialBindGroupLayoutEntries[3].visibility = WGPUShaderStage_Fragment;
+    materialBindGroupLayoutEntries[3].buffer.nextInChain = nullptr;
+    materialBindGroupLayoutEntries[3].buffer.type = WGPUBufferBindingType_Undefined;
+    materialBindGroupLayoutEntries[3].buffer.hasDynamicOffset = false;
+    materialBindGroupLayoutEntries[3].buffer.minBindingSize = 0;
+    materialBindGroupLayoutEntries[3].sampler.nextInChain = nullptr;
+    materialBindGroupLayoutEntries[3].sampler.type = WGPUSamplerBindingType_Undefined;
+    materialBindGroupLayoutEntries[3].texture.nextInChain = nullptr;
+    materialBindGroupLayoutEntries[3].texture.sampleType = WGPUTextureSampleType_Float;
+    materialBindGroupLayoutEntries[3].texture.multisampled = false;
+    materialBindGroupLayoutEntries[3].texture.viewDimension = WGPUTextureViewDimension_2D;
+    materialBindGroupLayoutEntries[3].storageTexture.nextInChain = nullptr;
+    materialBindGroupLayoutEntries[3].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    materialBindGroupLayoutEntries[3].storageTexture.format = WGPUTextureFormat_Undefined;
+    materialBindGroupLayoutEntries[3].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
     WGPUBindGroupLayoutDescriptor materialBindGroupLayoutDescriptor;
     materialBindGroupLayoutDescriptor.nextInChain = nullptr;
     materialBindGroupLayoutDescriptor.label = nullptr;
-    materialBindGroupLayoutDescriptor.entryCount = 3;
+    materialBindGroupLayoutDescriptor.entryCount = 4;
     materialBindGroupLayoutDescriptor.entries = materialBindGroupLayoutEntries;
 
     WGPUBindGroupLayout bindGroupLayouts[3];
@@ -695,7 +720,7 @@ int main()
 
     for (auto & renderObject : renderObjects)
     {
-        WGPUBindGroupEntry materialBindGroupEntries[3];
+        WGPUBindGroupEntry materialBindGroupEntries[4];
 
         materialBindGroupEntries[0].nextInChain = nullptr;
         materialBindGroupEntries[0].binding = 0;
@@ -710,22 +735,30 @@ int main()
         materialBindGroupEntries[1].buffer = nullptr;
         materialBindGroupEntries[1].offset = 0;
         materialBindGroupEntries[1].size = 0;
-        materialBindGroupEntries[1].sampler = nullptr;
-        materialBindGroupEntries[1].textureView = renderObject.material.baseColorTextureView;
+        materialBindGroupEntries[1].sampler = sampler;
+        materialBindGroupEntries[1].textureView = nullptr;
 
         materialBindGroupEntries[2].nextInChain = nullptr;
         materialBindGroupEntries[2].binding = 2;
         materialBindGroupEntries[2].buffer = nullptr;
         materialBindGroupEntries[2].offset = 0;
         materialBindGroupEntries[2].size = 0;
-        materialBindGroupEntries[2].sampler = sampler;
-        materialBindGroupEntries[2].textureView = nullptr;
+        materialBindGroupEntries[2].sampler = nullptr;
+        materialBindGroupEntries[2].textureView = renderObject.material.baseColorTextureView;
+
+        materialBindGroupEntries[3].nextInChain = nullptr;
+        materialBindGroupEntries[3].binding = 3;
+        materialBindGroupEntries[3].buffer = nullptr;
+        materialBindGroupEntries[3].offset = 0;
+        materialBindGroupEntries[3].size = 0;
+        materialBindGroupEntries[3].sampler = nullptr;
+        materialBindGroupEntries[3].textureView = renderObject.material.normalTextureView;
 
         WGPUBindGroupDescriptor materialBindGroupDescriptor;
         materialBindGroupDescriptor.nextInChain = nullptr;
         materialBindGroupDescriptor.label = nullptr;
         materialBindGroupDescriptor.layout = bindGroupLayouts[2];
-        materialBindGroupDescriptor.entryCount = 3;
+        materialBindGroupDescriptor.entryCount = 4;
         materialBindGroupDescriptor.entries = materialBindGroupEntries;
 
         renderObject.materialBindGroup = wgpuDeviceCreateBindGroup(application.device(), &materialBindGroupDescriptor);
