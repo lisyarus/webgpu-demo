@@ -22,7 +22,15 @@ struct Vertex
     glm::vec2 texcoord;
 };
 
-struct GPUMaterial
+struct CameraUniform
+{
+    glm::mat4 viewProjection;
+    glm::mat4 viewProjectionInverse;
+    glm::vec3 position;
+    float padding1[1];
+};
+
+struct MaterialUniform
 {
     glm::vec4 baseColorFactor;
     float metallicFactor;
@@ -35,6 +43,12 @@ struct GPUMaterial
 static const char shaderCode[] =
 R"(
 
+struct Camera {
+    viewProjection : mat4x4f,
+    viewProjectionInverse : mat4x4f,
+    position : vec3f,
+}
+
 struct Material {
     baseColorFactor : vec4f,
     metallicFactor : f32,
@@ -42,7 +56,7 @@ struct Material {
     emissiveFactor : vec3f,
 }
 
-@group(0) @binding(0) var<uniform> viewProjection: mat4x4f;
+@group(0) @binding(0) var<uniform> camera: Camera;
 
 @group(1) @binding(0) var<uniform> model: mat4x4f;
 
@@ -62,9 +76,10 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position : vec4f,
-    @location(0) normal : vec3f,
-    @location(1) tangent : vec4f,
-    @location(2) texcoord : vec2f,
+    @location(0) worldPosition : vec3f,
+    @location(1) normal : vec3f,
+    @location(2) tangent : vec4f,
+    @location(3) texcoord : vec2f,
 }
 
 fn asMat3x3(m : mat4x4f) -> mat3x3f {
@@ -73,10 +88,11 @@ fn asMat3x3(m : mat4x4f) -> mat3x3f {
 
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    let position : vec4f = viewProjection * model * vec4f(in.position, 1.0);
+    let worldPosition = (model * vec4f(in.position, 1.0)).xyz;
+    let position : vec4f = camera.viewProjection * vec4f(worldPosition, 1.0);
     let normal : vec3f = normalize(asMat3x3(model) * in.normal);
     let tangent : vec4f = vec4f(normalize(asMat3x3(model) * in.tangent.xyz), in.tangent.w);
-    return VertexOutput(position, normal, tangent, in.texcoord);
+    return VertexOutput(position, worldPosition, normal, tangent, in.texcoord);
 }
 
 fn Uncharted2TonemapImpl(x : vec3f) -> vec3f {
@@ -130,7 +146,13 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let lightDirection = normalize(vec3f(1.0, 2.0, 3.0));
     let lightIntensity = vec3f(10.0, 8.0, 6.0);
 
-    let outColor = (ambientLight + max(0.0, dot(normal, lightDirection)) * lightIntensity) * baseColor;
+    let viewDirection = normalize(camera.position - in.worldPosition);
+    let halfway = normalize(lightDirection + viewDirection);
+
+    let lightness = max(0.0, dot(normal, lightDirection));
+    let specular = lightness * metallic * pow(max(0.0, dot(viewDirection, halfway)), 1.0 / max(0.0001, roughness * roughness));
+
+    let outColor = (ambientLight + (lightness + specular) * lightIntensity) * baseColor;
 
     return vec4f(tonemap(outColor), 1.0);
 }
@@ -307,11 +329,11 @@ int main()
     WGPUBindGroupLayoutEntry cameraBindGroupLayoutEntry[1];
     cameraBindGroupLayoutEntry[0].nextInChain = nullptr;
     cameraBindGroupLayoutEntry[0].binding = 0;
-    cameraBindGroupLayoutEntry[0].visibility = WGPUShaderStage_Vertex;
+    cameraBindGroupLayoutEntry[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
     cameraBindGroupLayoutEntry[0].buffer.nextInChain = nullptr;
     cameraBindGroupLayoutEntry[0].buffer.type = WGPUBufferBindingType_Uniform;
     cameraBindGroupLayoutEntry[0].buffer.hasDynamicOffset = false;
-    cameraBindGroupLayoutEntry[0].buffer.minBindingSize = 64;
+    cameraBindGroupLayoutEntry[0].buffer.minBindingSize = sizeof(CameraUniform);
     cameraBindGroupLayoutEntry[0].sampler.nextInChain = nullptr;
     cameraBindGroupLayoutEntry[0].sampler.type = WGPUSamplerBindingType_Undefined;
     cameraBindGroupLayoutEntry[0].texture.nextInChain = nullptr;
@@ -362,7 +384,7 @@ int main()
     materialBindGroupLayoutEntries[0].buffer.nextInChain = nullptr;
     materialBindGroupLayoutEntries[0].buffer.type = WGPUBufferBindingType_Uniform;
     materialBindGroupLayoutEntries[0].buffer.hasDynamicOffset = false;
-    materialBindGroupLayoutEntries[0].buffer.minBindingSize = sizeof(GPUMaterial);
+    materialBindGroupLayoutEntries[0].buffer.minBindingSize = sizeof(MaterialUniform);
     materialBindGroupLayoutEntries[0].sampler.nextInChain = nullptr;
     materialBindGroupLayoutEntries[0].sampler.type = WGPUSamplerBindingType_Undefined;
     materialBindGroupLayoutEntries[0].texture.nextInChain = nullptr;
@@ -698,7 +720,7 @@ int main()
     cameraUniformBufferDescriptor.nextInChain = nullptr;
     cameraUniformBufferDescriptor.label = nullptr;
     cameraUniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
-    cameraUniformBufferDescriptor.size = 64;
+    cameraUniformBufferDescriptor.size = sizeof(CameraUniform);
     cameraUniformBufferDescriptor.mappedAtCreation = false;
 
     WGPUBuffer cameraUniformBuffer = wgpuDeviceCreateBuffer(application.device(), &cameraUniformBufferDescriptor);
@@ -716,7 +738,7 @@ int main()
     materialUniformBufferDescriptor.nextInChain = nullptr;
     materialUniformBufferDescriptor.label = nullptr;
     materialUniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
-    materialUniformBufferDescriptor.size = sizeof(GPUMaterial);
+    materialUniformBufferDescriptor.size = sizeof(MaterialUniform);
     materialUniformBufferDescriptor.mappedAtCreation = false;
 
     WGPUBuffer materialUniformBuffer = wgpuDeviceCreateBuffer(application.device(), &materialUniformBufferDescriptor);
@@ -726,7 +748,7 @@ int main()
     cameraBindGroupEntry.binding = 0;
     cameraBindGroupEntry.buffer = cameraUniformBuffer;
     cameraBindGroupEntry.offset = 0;
-    cameraBindGroupEntry.size = 64;
+    cameraBindGroupEntry.size = sizeof(CameraUniform);
     cameraBindGroupEntry.sampler = nullptr;
     cameraBindGroupEntry.textureView = nullptr;
 
@@ -780,7 +802,7 @@ int main()
         materialBindGroupEntries[0].binding = 0;
         materialBindGroupEntries[0].buffer = materialUniformBuffer;
         materialBindGroupEntries[0].offset = 0;
-        materialBindGroupEntries[0].size = sizeof(GPUMaterial);
+        materialBindGroupEntries[0].size = sizeof(MaterialUniform);
         materialBindGroupEntries[0].sampler = nullptr;
         materialBindGroupEntries[0].textureView = nullptr;
 
@@ -896,9 +918,12 @@ int main()
             .movingSlow     = keysDown.contains(SDL_SCANCODE_LCTRL),
         });
 
-        glm::mat4 const viewProjectionMatrix = camera.viewProjectionMatrix();
+        CameraUniform cameraUniform;
+        cameraUniform.viewProjection = camera.viewProjectionMatrix();
+        cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
+        cameraUniform.position = camera.position();
 
-        wgpuQueueWriteBuffer(application.queue(), cameraUniformBuffer, 0, &viewProjectionMatrix, 64);
+        wgpuQueueWriteBuffer(application.queue(), cameraUniformBuffer, 0, &cameraUniform, sizeof(CameraUniform));
 
         if (resized || !depthTexture)
         {
@@ -978,7 +1003,7 @@ int main()
 
         for (auto const & renderObject : renderObjects)
         {
-            GPUMaterial material;
+            MaterialUniform material;
             material.baseColorFactor = renderObject.material.baseColorFactor;
             material.metallicFactor = renderObject.material.metallicFactor;
             material.roughnessFactor = renderObject.material.roughnessFactor;
