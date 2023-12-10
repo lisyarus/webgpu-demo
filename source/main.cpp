@@ -133,6 +133,25 @@ int main()
     vertexBufferLayout.attributeCount = 3;
     vertexBufferLayout.attributes = attributes;
 
+    WGPUDepthStencilState depthStencilState;
+    depthStencilState.nextInChain = nullptr;
+    depthStencilState.format = WGPUTextureFormat_Depth24Plus;
+    depthStencilState.depthWriteEnabled = true;
+    depthStencilState.depthCompare = WGPUCompareFunction_Less;
+    depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
+    depthStencilState.stencilFront.failOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilFront.passOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilBack.compare = WGPUCompareFunction_Always;
+    depthStencilState.stencilBack.failOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilBack.depthFailOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilBack.passOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilReadMask = 0;
+    depthStencilState.stencilWriteMask = 0;
+    depthStencilState.depthBias = 0;
+    depthStencilState.depthBiasSlopeScale = 0.f;
+    depthStencilState.depthBiasClamp = 0.f;
+
     WGPURenderPipelineDescriptor renderPipelineDescriptor;
     renderPipelineDescriptor.nextInChain = nullptr;
     renderPipelineDescriptor.label = nullptr;
@@ -149,7 +168,7 @@ int main()
     renderPipelineDescriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
     renderPipelineDescriptor.primitive.frontFace = WGPUFrontFace_CCW;
     renderPipelineDescriptor.primitive.cullMode = WGPUCullMode_Back;
-    renderPipelineDescriptor.depthStencil = nullptr;
+    renderPipelineDescriptor.depthStencil = &depthStencilState;
     renderPipelineDescriptor.multisample.nextInChain = nullptr;
     renderPipelineDescriptor.multisample.count = 1;
     renderPipelineDescriptor.multisample.mask = -1;
@@ -236,6 +255,9 @@ int main()
 
     WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(application.device(), &bindGroupDescriptor);
 
+    WGPUTexture depthTexture = nullptr;
+    WGPUTextureView depthTextureView = nullptr;
+
     glm::vec3 cameraPosition = glm::vec3(0.0, 0.0, 5.0);
     float cameraXAngle = 0.f;
     float cameraYAngle = 0.f;
@@ -256,6 +278,8 @@ int main()
     {
         std::cout << "Frame " << frameId << std::endl;
 
+        bool resized = false;
+
         while (auto event = application.poll()) switch (event->type)
         {
         case SDL_QUIT:
@@ -266,6 +290,7 @@ int main()
             {
             case SDL_WINDOWEVENT_RESIZED:
                 application.resize(event->window.data1, event->window.data2);
+                resized = true;
                 break;
             }
             break;
@@ -322,6 +347,42 @@ int main()
 
         wgpuQueueWriteBuffer(application.queue(), uniformBuffer, 0, &viewProjectionMatrix, 64);
 
+        if (resized || !depthTexture)
+        {
+            if (depthTexture)
+            {
+                wgpuTextureViewRelease(depthTextureView);
+                wgpuTextureRelease(depthTexture);
+            }
+
+            WGPUTextureDescriptor depthTextureDescriptor;
+            depthTextureDescriptor.nextInChain = nullptr;
+            depthTextureDescriptor.label = nullptr;
+            depthTextureDescriptor.usage = WGPUTextureUsage_RenderAttachment;
+            depthTextureDescriptor.dimension = WGPUTextureDimension_2D;
+            depthTextureDescriptor.size = {(std::uint32_t)application.width(), (std::uint32_t)application.height(), 1};
+            depthTextureDescriptor.format = WGPUTextureFormat_Depth24Plus;
+            depthTextureDescriptor.mipLevelCount = 1;
+            depthTextureDescriptor.sampleCount = 1;
+            depthTextureDescriptor.viewFormatCount = 1;
+            depthTextureDescriptor.viewFormats = &depthTextureDescriptor.format;
+
+            depthTexture = wgpuDeviceCreateTexture(application.device(), &depthTextureDescriptor);
+
+            WGPUTextureViewDescriptor depthTextureViewDescriptor;
+            depthTextureViewDescriptor.nextInChain = nullptr;
+            depthTextureViewDescriptor.label = nullptr;
+            depthTextureViewDescriptor.format = WGPUTextureFormat_Depth24Plus;
+            depthTextureViewDescriptor.dimension = WGPUTextureViewDimension_2D;
+            depthTextureViewDescriptor.baseMipLevel = 0;
+            depthTextureViewDescriptor.mipLevelCount = 1;
+            depthTextureViewDescriptor.baseArrayLayer = 0;
+            depthTextureViewDescriptor.arrayLayerCount = 1;
+            depthTextureViewDescriptor.aspect = WGPUTextureAspect_DepthOnly;
+
+            depthTextureView = wgpuTextureCreateView(depthTexture, &depthTextureViewDescriptor);
+        }
+
         WGPUCommandEncoderDescriptor commandEncoderDescriptor;
         commandEncoderDescriptor.nextInChain = nullptr;
         commandEncoderDescriptor.label = nullptr;
@@ -336,12 +397,23 @@ int main()
         renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
         renderPassColorAttachment.clearValue = {0.8, 0.9, 1.0, 1.0};
 
+        WGPURenderPassDepthStencilAttachment renderPassDepthStencilAttachment;
+        renderPassDepthStencilAttachment.view = depthTextureView;
+        renderPassDepthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+        renderPassDepthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+        renderPassDepthStencilAttachment.depthClearValue = 1.f;
+        renderPassDepthStencilAttachment.depthReadOnly = false;
+        renderPassDepthStencilAttachment.stencilLoadOp = WGPULoadOp_Undefined;
+        renderPassDepthStencilAttachment.stencilStoreOp = WGPUStoreOp_Undefined;
+        renderPassDepthStencilAttachment.stencilClearValue = 0;
+        renderPassDepthStencilAttachment.stencilReadOnly = true;
+
         WGPURenderPassDescriptor renderPassDescriptor;
         renderPassDescriptor.nextInChain = nullptr;
         renderPassDescriptor.label = nullptr;
         renderPassDescriptor.colorAttachmentCount = 1;
         renderPassDescriptor.colorAttachments = &renderPassColorAttachment;
-        renderPassDescriptor.depthStencilAttachment = nullptr;
+        renderPassDescriptor.depthStencilAttachment = &renderPassDepthStencilAttachment;
         renderPassDescriptor.occlusionQuerySet = nullptr;
         renderPassDescriptor.timestampWrites = nullptr;
 
