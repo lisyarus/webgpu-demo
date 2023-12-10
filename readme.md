@@ -18,6 +18,13 @@ To build this project, you need
 
 To install wgpu-native, download [some release archive](https://github.com/gfx-rs/wgpu-native/releases) for your platform, and unpack it somewhere. This project was built with the [v0.18.1.3](https://github.com/gfx-rs/wgpu-native/releases/tag/v0.18.1.3) release, and might not work with other version.
 
+Don't forget to check out submodules:
+* [glm](https://github.com/g-truc/glm) for vector & matrix maths
+* [rapidjson](https://github.com/Tencent/rapidjson) for parsing glTF scenes
+* [stb](https://github.com/nothings/stb) for loading images
+
+You can do this at clone time, using `git clone <repo-url> --recurse-submodules`. Add `--shallow-submodules` to prevent loading the whole commit history of those submodules. Otherwise, you can checkout submodules at any time after cloning the repo with `git submodule update --init --recursive`.
+
 Then, follow the usual steps for building something with CMake:
 * Create a build directory
 * In the build directory, run `cmake <path-to-webgpu-demo-source> -DWGPU_NATIVE_ROOT=<path-to-unpacked-wgpu-native>`
