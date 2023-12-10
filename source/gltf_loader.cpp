@@ -3,6 +3,9 @@
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 #include <fstream>
 #include <stdexcept>
 
@@ -220,6 +223,21 @@ namespace glTF
         std::ifstream input(bufferPath, std::ios::binary);
         result.assign(std::istreambuf_iterator<char>(input), {});
 
+        return result;
+    }
+
+    ImageInfo loadImage(std::filesystem::path const & assetPath, std::string const & imageUri)
+    {
+        auto const imagePath = assetPath.parent_path() / imageUri;
+
+        ImageInfo result;
+        result.data.reset(stbi_load(imagePath.c_str(), &result.width, &result.height, &result.channels, 0));
+        if (result.channels == 3)
+        {
+            // Reload with 4 channels, since WebGPU doesn't support 3-channel textures
+            result.data.reset(stbi_load(imagePath.c_str(), &result.width, &result.height, &result.channels, 4));
+            result.channels = 4;
+        }
         return result;
     }
 

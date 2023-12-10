@@ -63,6 +63,24 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
 )";
 
+struct Material
+{
+    glm::vec4 baseColorFactor;
+    WGPUTextureView baseColorTextureView;
+
+    float metallicFactor;
+    float roughnessFactor;
+    WGPUTextureView metallicRoughnessTextureView;
+
+    WGPUTextureView normalTextureView;
+
+    WGPUTextureView occlusionTextureView;
+
+    glm::vec3 emissiveFactor;
+    WGPUTextureView emissiveTextureView;
+
+};
+
 struct RenderObject
 {
     std::uint32_t vertexByteOffset;
@@ -76,6 +94,8 @@ struct RenderObject
     WGPUIndexFormat indexFormat;
 
     glm::mat4 modelMatrix;
+
+    Material material;
 };
 
 template <typename T>
@@ -115,6 +135,84 @@ int main()
     glTF::Asset asset = glTF::load(assetPath);
 
     Application application;
+
+    std::vector<WGPUTexture> textures;
+
+    for (auto const & textureIn : asset.textures)
+    {
+        auto & texture = textures.emplace_back();
+
+        if (!textureIn.source) continue;
+
+        auto imageInfo = glTF::loadImage(assetPath, asset.images[*textureIn.source].uri);
+
+        WGPUTextureDescriptor textureDescriptor;
+        textureDescriptor.nextInChain = nullptr;
+        textureDescriptor.label = nullptr;
+        textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+        textureDescriptor.dimension = WGPUTextureDimension_2D;
+        textureDescriptor.size = {(std::uint32_t)imageInfo.width, (std::uint32_t)imageInfo.height, 1};
+
+        std::optional<WGPUTextureFormat> sRGBViewFormat;
+
+        if (imageInfo.channels == 1)
+            textureDescriptor.format = WGPUTextureFormat_R8Unorm;
+        else if (imageInfo.channels == 2)
+            textureDescriptor.format = WGPUTextureFormat_RG8Unorm;
+        else if (imageInfo.channels == 4)
+        {
+            textureDescriptor.format = WGPUTextureFormat_RGBA8Unorm;
+            sRGBViewFormat = WGPUTextureFormat_RGBA8UnormSrgb;
+        }
+
+        textureDescriptor.mipLevelCount = 1;
+        textureDescriptor.sampleCount = 1;
+        textureDescriptor.viewFormatCount = sRGBViewFormat ? 1 : 0;
+        textureDescriptor.viewFormats = sRGBViewFormat ? &(*sRGBViewFormat) : nullptr;
+
+        texture = wgpuDeviceCreateTexture(application.device(), &textureDescriptor);
+
+        WGPUImageCopyTexture imageCopyTexture;
+        imageCopyTexture.nextInChain = nullptr;
+        imageCopyTexture.texture = texture;
+        imageCopyTexture.mipLevel = 0;
+        imageCopyTexture.origin = {0, 0, 0};
+        imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+        WGPUTextureDataLayout textureDataLayout;
+        textureDataLayout.nextInChain = nullptr;
+        textureDataLayout.offset = 0;
+        textureDataLayout.bytesPerRow = imageInfo.width * imageInfo.channels;
+        textureDataLayout.rowsPerImage = imageInfo.height;
+
+        WGPUExtent3D writeSize;
+        writeSize.width = imageInfo.width;
+        writeSize.height = imageInfo.height;
+        writeSize.depthOrArrayLayers = 1;
+
+        wgpuQueueWriteTexture(application.queue(), &imageCopyTexture, imageInfo.data.get(), imageInfo.width * imageInfo.height * imageInfo.channels, &textureDataLayout, &writeSize);
+    }
+
+    auto createTextureView = [&](std::uint32_t textureId, bool sRGB)
+    {
+        WGPUTextureFormat format = wgpuTextureGetFormat(textures[textureId]);
+
+        if (format == WGPUTextureFormat_RGBA8Unorm && sRGB)
+            format = WGPUTextureFormat_RGBA8UnormSrgb;
+
+        WGPUTextureViewDescriptor textureViewDescriptor;
+        textureViewDescriptor.nextInChain = nullptr;
+        textureViewDescriptor.label = nullptr;
+        textureViewDescriptor.format = format;
+        textureViewDescriptor.dimension = WGPUTextureViewDimension_2D;
+        textureViewDescriptor.baseMipLevel = 0;
+        textureViewDescriptor.mipLevelCount = 1;
+        textureViewDescriptor.baseArrayLayer = 0;
+        textureViewDescriptor.arrayLayerCount = 1;
+        textureViewDescriptor.aspect = WGPUTextureAspect_All;
+
+        return wgpuTextureCreateView(textures[textureId], &textureViewDescriptor);
+    };
 
     WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;
     shaderModuleWGSLDescriptor.chain.next = nullptr;
@@ -304,6 +402,8 @@ int main()
 
                 if (primitive.mode != glTF::Primitive::Mode::Triangles) continue;
 
+                if (!primitive.material) continue;
+
                 auto const & positionAccessor = asset.accessors[*primitive.attributes.position];
                 auto const &   normalAccessor = asset.accessors[*primitive.attributes.normal];
                 auto const &  tangentAccessor = asset.accessors[*primitive.attributes.tangent];
@@ -322,6 +422,8 @@ int main()
                 if (texcoordAccessor.type != glTF::Accessor::Type::Vec2) continue;
                 if (   indexAccessor.type != glTF::Accessor::Type::Scalar) continue;
 
+                auto const & materialIn = asset.materials[*primitive.material];
+
                 auto & renderObject = renderObjects.emplace_back();
 
                 renderObject.vertexByteOffset = vertices.size() * sizeof(vertices[0]);
@@ -332,6 +434,23 @@ int main()
                 renderObject.indexCount = indexAccessor.count;
                 renderObject.indexFormat = WGPUIndexFormat_Uint16;
                 renderObject.modelMatrix = nodeModelMatrix;
+
+                renderObject.material.baseColorFactor = materialIn.baseColorFactor;
+                renderObject.material.metallicFactor = materialIn.metallicFactor;
+                renderObject.material.roughnessFactor = materialIn.roughnessFactor;
+                renderObject.material.emissiveFactor = materialIn.emissiveFactor;
+
+                if (materialIn.baseColorTexture)
+                    renderObject.material.baseColorTextureView = createTextureView(*materialIn.baseColorTexture, true);
+
+                if (materialIn.metallicRoughnessTexture)
+                    renderObject.material.metallicRoughnessTextureView = createTextureView(*materialIn.metallicRoughnessTexture, false);
+
+                if (materialIn.normalTexture)
+                    renderObject.material.normalTextureView = createTextureView(*materialIn.normalTexture, false);
+
+                if (materialIn.emissiveTexture)
+                    renderObject.material.emissiveTextureView = createTextureView(*materialIn.emissiveTexture, false);
 
                 auto const & positionBufferView = asset.bufferViews[positionAccessor.bufferView];
                 auto const &   normalBufferView = asset.bufferViews[  normalAccessor.bufferView];

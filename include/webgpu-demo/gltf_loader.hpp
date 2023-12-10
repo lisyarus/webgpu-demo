@@ -11,4 +11,14 @@ namespace glTF
 
     std::vector<char> loadBuffer(std::filesystem::path const & assetPath, std::string const & bufferUri);
 
+    struct ImageInfo
+    {
+        int width;
+        int height;
+        int channels;
+        std::unique_ptr<unsigned char[]> data;
+    };
+
+    ImageInfo loadImage(std::filesystem::path const & assetPath, std::string const & imageUri);
+
 }

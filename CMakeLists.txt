@@ -25,6 +25,7 @@ target_include_directories(webgpu-demo PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
 	"${CMAKE_CURRENT_SOURCE_DIR}/glm"
 	"${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include"
+	"${CMAKE_CURRENT_SOURCE_DIR}/stb"
 )
 
 target_compile_definitions(webgpu-demo PUBLIC
