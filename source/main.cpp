@@ -22,12 +22,31 @@ struct Vertex
     glm::vec2 texcoord;
 };
 
+struct GPUMaterial
+{
+    glm::vec4 baseColorFactor;
+    float metallicFactor;
+    float roughnessFactor;
+    float padding1[2];
+    glm::vec3 emissiveFactor;
+    float padding2[1];
+};
+
 static const char shaderCode[] =
 R"(
+
+struct Material {
+    baseColorFactor : vec4f,
+    metallicFactor : f32,
+    roughnessFactor : f32,
+    emissiveFactor : vec3f,
+}
 
 @group(0) @binding(0) var<uniform> viewProjection: mat4x4f;
 
 @group(1) @binding(0) var<uniform> model: mat4x4f;
+
+@group(2) @binding(0) var<uniform> material : Material;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -58,7 +77,7 @@ fn vertexMain(in : VertexInput) -> VertexOutput {
 
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
-    return vec4f(pow(in.normal * 0.5 + vec3f(0.5), vec3f(2.2)), 1.0);
+    return vec4f(pow(in.normal * 0.5 + 0.5, vec3f(2.2)), 1.0);
 }
 
 )";
@@ -277,14 +296,40 @@ int main()
     modelBindGroupLayoutDescriptor.entryCount = 1;
     modelBindGroupLayoutDescriptor.entries = modelBindGroupLayoutEntry;
 
-    WGPUBindGroupLayout bindGroupLayouts[2];
+    WGPUBindGroupLayoutEntry materialBindGroupLayoutEntry[1];
+    materialBindGroupLayoutEntry[0].nextInChain = nullptr;
+    materialBindGroupLayoutEntry[0].binding = 0;
+    materialBindGroupLayoutEntry[0].visibility = WGPUShaderStage_Fragment;
+    materialBindGroupLayoutEntry[0].buffer.nextInChain = nullptr;
+    materialBindGroupLayoutEntry[0].buffer.type = WGPUBufferBindingType_Uniform;
+    materialBindGroupLayoutEntry[0].buffer.hasDynamicOffset = false;
+    materialBindGroupLayoutEntry[0].buffer.minBindingSize = sizeof(GPUMaterial);
+    materialBindGroupLayoutEntry[0].sampler.nextInChain = nullptr;
+    materialBindGroupLayoutEntry[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    materialBindGroupLayoutEntry[0].texture.nextInChain = nullptr;
+    materialBindGroupLayoutEntry[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    materialBindGroupLayoutEntry[0].texture.multisampled = false;
+    materialBindGroupLayoutEntry[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    materialBindGroupLayoutEntry[0].storageTexture.nextInChain = nullptr;
+    materialBindGroupLayoutEntry[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    materialBindGroupLayoutEntry[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    materialBindGroupLayoutEntry[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor materialBindGroupLayoutDescriptor;
+    materialBindGroupLayoutDescriptor.nextInChain = nullptr;
+    materialBindGroupLayoutDescriptor.label = nullptr;
+    materialBindGroupLayoutDescriptor.entryCount = 1;
+    materialBindGroupLayoutDescriptor.entries = materialBindGroupLayoutEntry;
+
+    WGPUBindGroupLayout bindGroupLayouts[3];
     bindGroupLayouts[0] = wgpuDeviceCreateBindGroupLayout(application.device(), &cameraBindGroupLayoutDescriptor);
     bindGroupLayouts[1] = wgpuDeviceCreateBindGroupLayout(application.device(), &modelBindGroupLayoutDescriptor);
+    bindGroupLayouts[2] = wgpuDeviceCreateBindGroupLayout(application.device(), &materialBindGroupLayoutDescriptor);
 
     WGPUPipelineLayoutDescriptor pipelineLayoutDescriptor;
     pipelineLayoutDescriptor.nextInChain = nullptr;
     pipelineLayoutDescriptor.label = nullptr;
-    pipelineLayoutDescriptor.bindGroupLayoutCount = 2;
+    pipelineLayoutDescriptor.bindGroupLayoutCount = 3;
     pipelineLayoutDescriptor.bindGroupLayouts = bindGroupLayouts;
 
     WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(application.device(), &pipelineLayoutDescriptor);
@@ -522,6 +567,15 @@ int main()
 
     WGPUBuffer modelUniformBuffer = wgpuDeviceCreateBuffer(application.device(), &modelUniformBufferDescriptor);
 
+    WGPUBufferDescriptor materialUniformBufferDescriptor;
+    materialUniformBufferDescriptor.nextInChain = nullptr;
+    materialUniformBufferDescriptor.label = nullptr;
+    materialUniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+    materialUniformBufferDescriptor.size = sizeof(GPUMaterial);
+    materialUniformBufferDescriptor.mappedAtCreation = false;
+
+    WGPUBuffer materialUniformBuffer = wgpuDeviceCreateBuffer(application.device(), &materialUniformBufferDescriptor);
+
     WGPUBindGroupEntry cameraBindGroupEntry;
     cameraBindGroupEntry.nextInChain = nullptr;
     cameraBindGroupEntry.binding = 0;
@@ -554,9 +608,26 @@ int main()
     modelBindGroupDescriptor.entryCount = 1;
     modelBindGroupDescriptor.entries = &modelBindGroupEntry;
 
-    WGPUBindGroup bindGroups[2];
+    WGPUBindGroupEntry materialBindGroupEntry;
+    materialBindGroupEntry.nextInChain = nullptr;
+    materialBindGroupEntry.binding = 0;
+    materialBindGroupEntry.buffer = materialUniformBuffer;
+    materialBindGroupEntry.offset = 0;
+    materialBindGroupEntry.size = sizeof(GPUMaterial);
+    materialBindGroupEntry.sampler = nullptr;
+    materialBindGroupEntry.textureView = nullptr;
+
+    WGPUBindGroupDescriptor materialBindGroupDescriptor;
+    materialBindGroupDescriptor.nextInChain = nullptr;
+    materialBindGroupDescriptor.label = nullptr;
+    materialBindGroupDescriptor.layout = bindGroupLayouts[2];
+    materialBindGroupDescriptor.entryCount = 1;
+    materialBindGroupDescriptor.entries = &materialBindGroupEntry;
+
+    WGPUBindGroup bindGroups[3];
     bindGroups[0] = wgpuDeviceCreateBindGroup(application.device(), &cameraBindGroupDescriptor);
     bindGroups[1] = wgpuDeviceCreateBindGroup(application.device(), &modelBindGroupDescriptor);
+    bindGroups[2] = wgpuDeviceCreateBindGroup(application.device(), &materialBindGroupDescriptor);
 
     WGPUTexture depthTexture = nullptr;
     WGPUTextureView depthTextureView = nullptr;
@@ -703,10 +774,18 @@ int main()
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, bindGroups[0], 0, nullptr);
         wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 1, bindGroups[1], 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 2, bindGroups[2], 0, nullptr);
 
         for (auto const & renderObject : renderObjects)
         {
+            GPUMaterial material;
+            material.baseColorFactor = renderObject.material.baseColorFactor;
+            material.metallicFactor = renderObject.material.metallicFactor;
+            material.roughnessFactor = renderObject.material.roughnessFactor;
+            material.emissiveFactor = renderObject.material.emissiveFactor;
+
             wgpuQueueWriteBuffer(application.queue(), modelUniformBuffer, 0, &renderObject.modelMatrix, 64);
+            wgpuQueueWriteBuffer(application.queue(), materialUniformBuffer, 0, &material, sizeof(material));
 
             wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, renderObject.vertexByteOffset, renderObject.vertexByteLength);
             wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder, indexBuffer, renderObject.indexFormat, renderObject.indexByteOffset, renderObject.indexByteLength);
