@@ -124,6 +124,8 @@ struct RenderObject
     WGPUIndexFormat indexFormat;
 
     glm::mat4 modelMatrix;
+    glm::vec3 bboxMin;
+    glm::vec3 bboxMax;
 
     Material material;
 
@@ -467,6 +469,9 @@ int main()
     WGPUBuffer vertexBuffer;
     WGPUBuffer indexBuffer;
 
+    glm::vec3 sceneBboxMin = glm::vec3( std::numeric_limits<float>::infinity());
+    glm::vec3 sceneBboxMax = glm::vec3(-std::numeric_limits<float>::infinity());
+
     {
         if (asset.buffers.size() != 1)
             throw std::runtime_error("Only 1 binary buffer is supported");
@@ -529,6 +534,8 @@ int main()
                 renderObject.indexCount = indexAccessor.count;
                 renderObject.indexFormat = WGPUIndexFormat_Uint16;
                 renderObject.modelMatrix = nodeModelMatrix;
+                renderObject.bboxMin = glm::vec3( std::numeric_limits<float>::infinity());
+                renderObject.bboxMax = glm::vec3(-std::numeric_limits<float>::infinity());
 
                 renderObject.material.baseColorFactor = materialIn.baseColorFactor;
                 renderObject.material.metallicFactor = materialIn.metallicFactor;
@@ -559,12 +566,21 @@ int main()
                 auto texcoordIterator = AccessorIterator<glm::vec2>(assetBufferData.data() + texcoordBufferView.byteOffset + texcoordAccessor.byteOffset, texcoordBufferView.byteStride);
 
                 for (int i = 0; i < positionAccessor.count; ++i)
+                {
                     vertices.push_back({
                         *positionIterator++,
                         *  normalIterator++,
                         * tangentIterator++,
                         *texcoordIterator++,
                     });
+
+                    auto transformedVertex = glm::vec3((renderObject.modelMatrix * glm::vec4(vertices.back().position, 1.f)));
+
+                    renderObject.bboxMin = glm::min(renderObject.bboxMin, transformedVertex); renderObject.bboxMax = glm::max(renderObject.bboxMax, transformedVertex);
+                }
+
+                sceneBboxMin = glm::min(sceneBboxMin, renderObject.bboxMin);
+                sceneBboxMax = glm::max(sceneBboxMax, renderObject.bboxMax);
 
                 auto indexIterator = AccessorIterator<std::uint16_t>(assetBufferData.data() + indexBufferView.byteOffset + indexAccessor.byteOffset, indexBufferView.byteStride);
                 for (int i = 0; i < indexAccessor.count; ++i)
@@ -719,7 +735,11 @@ int main()
     WGPUTextureView depthTextureView = nullptr;
 
     Camera camera;
+    camera.move((sceneBboxMin + sceneBboxMax) / 2.f);
     camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
+    float sceneDiagonal = glm::distance(sceneBboxMin, sceneBboxMax);
+    camera.setClip(sceneDiagonal / 1000.f, sceneDiagonal);
+    camera.setSpeed(sceneDiagonal / 10.f);
 
     std::unordered_set<SDL_Scancode> keysDown;
 

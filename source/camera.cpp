@@ -2,10 +2,26 @@
 
 #include <glm/gtx/transform.hpp>
 
+void Camera::move(glm::vec3 const & position)
+{
+    position_ = position;
+}
+
 void Camera::setFov(float fovY, float aspectRatio)
 {
     fovY_ = fovY;
     aspectRatio_ = aspectRatio;
+}
+
+void Camera::setClip(float near, float far)
+{
+    near_ = near;
+    far_ = far;
+}
+
+void Camera::setSpeed(float speed)
+{
+    speed_ = speed;
 }
 
 void Camera::rotate(float deltaX, float deltaY)

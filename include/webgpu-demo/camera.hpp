@@ -14,7 +14,10 @@ struct Camera
         bool movingSlow;
     };
 
+    void move(glm::vec3 const & position);
     void setFov(float fovY, float aspectRatio);
+    void setClip(float near, float far);
+    void setSpeed(float speed);
     void rotate(float deltaX, float deltaY);
     void update(float dt, UpdateData const & updateData);
 
