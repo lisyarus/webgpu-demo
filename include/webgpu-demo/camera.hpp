@@ -29,8 +29,10 @@ private:
 
     float fovY_ = std::atan(1.f);
     float aspectRatio_ = 1.f;
+    float near_ = 1.f;
+    float far_ = 5000.f;
 
     float sensitivity_ = 0.003f;
-    float speed_ = 3.f;
+    float speed_ = 300.f;
     float smoothness_ = 20.f;
 };

@@ -53,7 +53,7 @@ glm::mat4 Camera::viewMatrix() const
 
 glm::mat4 Camera::projectionMatrix() const
 {
-    return glm::perspective(fovY_, aspectRatio_, 0.01f, 100.f);
+    return glm::perspective(fovY_, aspectRatio_, near_, far_);
 }
 
 glm::mat4 Camera::viewProjectionMatrix() const

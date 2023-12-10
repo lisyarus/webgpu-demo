@@ -16,8 +16,9 @@
 struct Vertex
 {
     glm::vec3 position;
-    std::uint32_t color;
     glm::vec3 normal;
+    glm::vec4 tangent;
+    glm::vec2 texcoord;
 };
 
 static const char shaderCode[] =
@@ -28,36 +29,78 @@ R"(
 struct VertexInput {
     @builtin(vertex_index) index : u32,
     @location(0) position : vec3f,
-    @location(1) color : vec4f,
-    @location(2) normal : vec3f,
+    @location(1) normal : vec3f,
+    @location(2) tangent: vec4f,
+    @location(3) texcoord : vec2f,
 }
 
 struct VertexOutput {
     @builtin(position) position : vec4f,
-    @location(0) color : vec4f,
-    @location(1) normal : vec3f,
+    @location(0) normal : vec3f,
+    @location(1) tangent : vec4f,
+    @location(2) texcoord : vec2f,
 }
 
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    return VertexOutput(viewProjection * vec4f(in.position, 1.0), in.color, in.normal);
+    return VertexOutput(viewProjection * vec4f(in.position, 1.0), in.normal, in.tangent, in.texcoord);
 }
 
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
-    return in.color * (0.5 + 0.5 * dot(normalize(in.normal), normalize(vec3f(1.0, 2.0, 3.0))));
+    return vec4f(pow(in.normal * 0.5 + vec3f(0.5), vec3f(2.2)), 1.0);
 }
 
 )";
+
+struct RenderObject
+{
+    std::uint32_t vertexByteOffset;
+    std::uint32_t vertexByteLength;
+    std::uint32_t vertexCount;
+
+    std::uint32_t indexByteOffset;
+    std::uint32_t indexByteLength;
+    std::uint32_t indexCount;
+
+    WGPUIndexFormat indexFormat;
+};
+
+template <typename T>
+struct AccessorIterator
+{
+    AccessorIterator(char const * ptr, std::optional<std::uint32_t> stride)
+        : ptr_(ptr)
+        , stride_(stride.value_or(sizeof(T)))
+    {}
+
+    T const & operator * () const
+    {
+        return *reinterpret_cast<T const *>(ptr_);
+    }
+
+    AccessorIterator & operator ++ ()
+    {
+        ptr_ += stride_;
+        return *this;
+    }
+
+    AccessorIterator operator ++ (int)
+    {
+        auto copy = *this;
+        operator++();
+        return copy;
+    }
+
+private:
+    char const * ptr_;
+    std::size_t stride_;
+};
 
 int main()
 {
     std::filesystem::path const assetPath = PROJECT_ROOT "/Sponza/Sponza.gltf";
     glTF::Asset asset = glTF::load(assetPath);
-
-    std::vector<std::vector<char>> assetBuffersData;
-    for (auto const & buffer : asset.buffers)
-        assetBuffersData.push_back(glTF::loadBuffer(assetPath, buffer.uri));
 
     Application application;
 
@@ -124,21 +167,24 @@ int main()
     fragmentState.targetCount = 1;
     fragmentState.targets = &colorTargetState;
 
-    WGPUVertexAttribute attributes[3];
+    WGPUVertexAttribute attributes[4];
     attributes[0].format = WGPUVertexFormat_Float32x3;
     attributes[0].offset = 0;
     attributes[0].shaderLocation = 0;
-    attributes[1].format = WGPUVertexFormat_Unorm8x4;
+    attributes[1].format = WGPUVertexFormat_Float32x3;
     attributes[1].offset = 12;
     attributes[1].shaderLocation = 1;
-    attributes[2].format = WGPUVertexFormat_Float32x3;
-    attributes[2].offset = 16;
+    attributes[2].format = WGPUVertexFormat_Float32x4;
+    attributes[2].offset = 24;
     attributes[2].shaderLocation = 2;
+    attributes[3].format = WGPUVertexFormat_Float32x2;
+    attributes[3].offset = 40;
+    attributes[3].shaderLocation = 3;
 
     WGPUVertexBufferLayout vertexBufferLayout;
     vertexBufferLayout.arrayStride = sizeof(Vertex);
     vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
-    vertexBufferLayout.attributeCount = 3;
+    vertexBufferLayout.attributeCount = 4;
     vertexBufferLayout.attributes = attributes;
 
     WGPUDepthStencilState depthStencilState;
@@ -185,56 +231,110 @@ int main()
 
     WGPURenderPipeline renderPipeline = wgpuDeviceCreateRenderPipeline(application.device(), &renderPipelineDescriptor);
 
-    std::vector<Vertex> vertices;
+    std::vector<RenderObject> renderObjects;
+    WGPUBuffer vertexBuffer;
+    WGPUBuffer indexBuffer;
 
     {
-        float const X = 0.525731112119133606f;
-        float const Z = 0.850650808352039932f;
+        if (asset.buffers.size() != 1)
+            throw std::runtime_error("Only 1 binary buffer is supported");
 
-        glm::vec3 const icosahedronVertices[12]
+        std::vector<char> assetBufferData = glTF::loadBuffer(assetPath, asset.buffers[0].uri);
+
+        std::vector<Vertex> vertices;
+        std::vector<std::uint16_t> indices;
+
+        for (auto const & mesh : asset.meshes)
         {
-            {-X, 0.0, Z}, {X, 0.0, Z}, {-X, 0.0, -Z}, {X, 0.0, -Z},
-            {0.0, Z, X}, {0.0, Z, -X}, {0.0, -Z, X}, {0.0, -Z, -X},
-            {Z, X, 0.0}, {-Z, X, 0.0}, {Z, -X, 0.0}, {-Z, -X, 0.0}
-        };
-
-        std::uint32_t const icosahedronTriangles[20][3]
-        {
-            {0,4,1}, {0,9,4}, {9,5,4}, {4,5,8}, {4,8,1},
-            {8,10,1}, {8,3,10}, {5,3,8}, {5,2,3}, {2,7,3},
-            {7,10,3}, {7,6,10}, {7,11,6}, {11,0,6}, {0,1,6},
-            {6,1,10}, {9,0,11}, {9,11,2}, {9,2,5}, {7,2,11}
-        };
-
-        for (auto const & triangle : icosahedronTriangles)
-        {
-            std::uint32_t color = 0xffff3fffu;
-
-            glm::vec3 triangleVertices[3]
+            for (auto const & primitive : mesh.primitives)
             {
-                icosahedronVertices[triangle[0]],
-                icosahedronVertices[triangle[2]],
-                icosahedronVertices[triangle[1]],
-            };
+                if (!primitive.attributes.position) continue;
+                if (!primitive.attributes.normal) continue;
+                if (!primitive.attributes.tangent) continue;
+                if (!primitive.attributes.texcoord) continue;
+                if (!primitive.indices) continue;
 
-            glm::vec3 normal = glm::normalize(glm::cross(triangleVertices[1] - triangleVertices[0], triangleVertices[2] - triangleVertices[0]));
+                if (primitive.mode != glTF::Primitive::Mode::Triangles) continue;
 
-            vertices.push_back(Vertex{triangleVertices[0], color, normal});
-            vertices.push_back(Vertex{triangleVertices[1], color, normal});
-            vertices.push_back(Vertex{triangleVertices[2], color, normal});
+                auto const & positionAccessor = asset.accessors[*primitive.attributes.position];
+                auto const &   normalAccessor = asset.accessors[*primitive.attributes.normal];
+                auto const &  tangentAccessor = asset.accessors[*primitive.attributes.tangent];
+                auto const & texcoordAccessor = asset.accessors[*primitive.attributes.texcoord];
+                auto const &    indexAccessor = asset.accessors[*primitive.indices];
+
+                if (positionAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                if (  normalAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                if ( tangentAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                if (texcoordAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                if (   indexAccessor.componentType != glTF::Accessor::ComponentType::UnsignedShort) continue;
+
+                if (positionAccessor.type != glTF::Accessor::Type::Vec3) continue;
+                if (  normalAccessor.type != glTF::Accessor::Type::Vec3) continue;
+                if ( tangentAccessor.type != glTF::Accessor::Type::Vec4) continue;
+                if (texcoordAccessor.type != glTF::Accessor::Type::Vec2) continue;
+                if (   indexAccessor.type != glTF::Accessor::Type::Scalar) continue;
+
+                auto & renderObject = renderObjects.emplace_back();
+
+                renderObject.vertexByteOffset = vertices.size() * sizeof(vertices[0]);
+                renderObject.vertexByteLength = positionAccessor.count * sizeof(vertices[0]);
+                renderObject.vertexCount = positionAccessor.count;
+                renderObject.indexByteOffset = indices.size() * sizeof(indices[0]);
+                renderObject.indexByteLength = indexAccessor.count * sizeof(indices[0]);
+                renderObject.indexCount = indexAccessor.count;
+                renderObject.indexFormat = WGPUIndexFormat_Uint16;
+
+                auto const & positionBufferView = asset.bufferViews[positionAccessor.bufferView];
+                auto const &   normalBufferView = asset.bufferViews[  normalAccessor.bufferView];
+                auto const &  tangentBufferView = asset.bufferViews[ tangentAccessor.bufferView];
+                auto const & texcoordBufferView = asset.bufferViews[texcoordAccessor.bufferView];
+                auto const &    indexBufferView = asset.bufferViews[   indexAccessor.bufferView];
+
+                auto positionIterator = AccessorIterator<glm::vec3>(assetBufferData.data() + positionBufferView.byteOffset + positionAccessor.byteOffset, positionBufferView.byteStride);
+                auto normalIterator = AccessorIterator<glm::vec3>(assetBufferData.data() + normalBufferView.byteOffset + normalAccessor.byteOffset, normalBufferView.byteStride);
+                auto tangentIterator = AccessorIterator<glm::vec4>(assetBufferData.data() + tangentBufferView.byteOffset + tangentAccessor.byteOffset, tangentBufferView.byteStride);
+                auto texcoordIterator = AccessorIterator<glm::vec2>(assetBufferData.data() + texcoordBufferView.byteOffset + texcoordAccessor.byteOffset, texcoordBufferView.byteStride);
+
+                for (int i = 0; i < positionAccessor.count; ++i)
+                    vertices.push_back({
+                        *positionIterator++,
+                        *  normalIterator++,
+                        * tangentIterator++,
+                        *texcoordIterator++,
+                    });
+
+                auto indexIterator = AccessorIterator<std::uint16_t>(assetBufferData.data() + indexBufferView.byteOffset + indexAccessor.byteOffset, indexBufferView.byteStride);
+                for (int i = 0; i < indexAccessor.count; ++i)
+                    indices.emplace_back(*indexIterator++);
+            }
         }
+
+        // Respect COPY_BUFFER_ALIGNMENT
+        if ((indices.size() % 2) != 0)
+            indices.push_back(0);
+
+        WGPUBufferDescriptor vertexBufferDescriptor;
+        vertexBufferDescriptor.nextInChain = nullptr;
+        vertexBufferDescriptor.label = nullptr;
+        vertexBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+        vertexBufferDescriptor.size = vertices.size() * sizeof(vertices[0]);
+        vertexBufferDescriptor.mappedAtCreation = false;
+
+        vertexBuffer = wgpuDeviceCreateBuffer(application.device(), &vertexBufferDescriptor);
+
+        wgpuQueueWriteBuffer(application.queue(), vertexBuffer, 0, vertices.data(), vertices.size() * sizeof(vertices[0]));
+
+        WGPUBufferDescriptor indexBufferDescriptor;
+        indexBufferDescriptor.nextInChain = nullptr;
+        indexBufferDescriptor.label = nullptr;
+        indexBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index;
+        indexBufferDescriptor.size = indices.size() * sizeof(indices[0]);
+        indexBufferDescriptor.mappedAtCreation = false;
+
+        indexBuffer = wgpuDeviceCreateBuffer(application.device(), &indexBufferDescriptor);
+
+        wgpuQueueWriteBuffer(application.queue(), indexBuffer, 0, indices.data(), indices.size() * sizeof(indices[0]));
     }
-
-    WGPUBufferDescriptor vertexBufferDescriptor;
-    vertexBufferDescriptor.nextInChain = nullptr;
-    vertexBufferDescriptor.label = nullptr;
-    vertexBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
-    vertexBufferDescriptor.size = vertices.size() * sizeof(vertices[0]);
-    vertexBufferDescriptor.mappedAtCreation = false;
-
-    WGPUBuffer vertexBuffer = wgpuDeviceCreateBuffer(application.device(), &vertexBufferDescriptor);
-
-    wgpuQueueWriteBuffer(application.queue(), vertexBuffer, 0, vertices.data(), vertices.size() * sizeof(vertices[0]));
 
     WGPUBufferDescriptor uniformBufferDescriptor;
     uniformBufferDescriptor.nextInChain = nullptr;
@@ -405,8 +505,13 @@ int main()
 
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, bindGroup, 0, nullptr);
-        wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, 0, vertices.size() * sizeof(vertices[0]));
-        wgpuRenderPassEncoderDraw(renderPassEncoder, vertices.size(), 1, 0, 0);
+
+        for (auto const & renderObject : renderObjects)
+        {
+            wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, renderObject.vertexByteOffset, renderObject.vertexByteLength);
+            wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder, indexBuffer, renderObject.indexFormat, renderObject.indexByteOffset, renderObject.indexByteLength);
+            wgpuRenderPassEncoderDrawIndexed(renderPassEncoder, renderObject.indexCount, 1, 0, 0, 0);
+        }
 
         wgpuRenderPassEncoderEnd(renderPassEncoder);
 
