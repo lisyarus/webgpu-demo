@@ -3,6 +3,7 @@
 #include <webgpu-demo/sdl_wgpu.h>
 #include <webgpu-demo/application.hpp>
 #include <webgpu-demo/camera.hpp>
+#include <webgpu-demo/gltf_loader.hpp>
 
 #include <glm/glm.hpp>
 
@@ -51,6 +52,13 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
 int main()
 {
+    std::filesystem::path const assetPath = PROJECT_ROOT "/Sponza/Sponza.gltf";
+    glTF::Asset asset = glTF::load(assetPath);
+
+    std::vector<std::vector<char>> assetBuffersData;
+    for (auto const & buffer : asset.buffers)
+        assetBuffersData.push_back(glTF::loadBuffer(assetPath, buffer.uri));
+
     Application application;
 
     WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;

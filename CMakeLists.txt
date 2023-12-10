@@ -24,6 +24,11 @@ target_link_libraries(webgpu-demo
 target_include_directories(webgpu-demo PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
 	"${CMAKE_CURRENT_SOURCE_DIR}/glm"
+	"${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include"
+)
+
+target_compile_definitions(webgpu-demo PUBLIC
+	-DPROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 if(APPLE)
