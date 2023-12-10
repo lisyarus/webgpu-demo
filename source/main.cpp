@@ -6,6 +6,7 @@
 #include <webgpu-demo/gltf_loader.hpp>
 
 #include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
 
 #include <iostream>
 #include <vector>
@@ -26,6 +27,8 @@ R"(
 
 @group(0) @binding(0) var<uniform> viewProjection: mat4x4f;
 
+@group(1) @binding(0) var<uniform> model: mat4x4f;
+
 struct VertexInput {
     @builtin(vertex_index) index : u32,
     @location(0) position : vec3f,
@@ -41,9 +44,16 @@ struct VertexOutput {
     @location(2) texcoord : vec2f,
 }
 
+fn asMat3x3(m : mat4x4f) -> mat3x3f {
+    return mat3x3f(m[0].xyz, m[1].xyz, m[2].xyz);
+}
+
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
-    return VertexOutput(viewProjection * vec4f(in.position, 1.0), in.normal, in.tangent, in.texcoord);
+    let position : vec4f = viewProjection * model * vec4f(in.position, 1.0);
+    let normal : vec3f = normalize(asMat3x3(model) * in.normal);
+    let tangent : vec4f = vec4f(normalize(asMat3x3(model) * in.tangent.xyz), in.tangent.w);
+    return VertexOutput(position, normal, tangent, in.texcoord);
 }
 
 @fragment
@@ -64,6 +74,8 @@ struct RenderObject
     std::uint32_t indexCount;
 
     WGPUIndexFormat indexFormat;
+
+    glm::mat4 modelMatrix;
 };
 
 template <typename T>
@@ -117,38 +129,65 @@ int main()
 
     WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(application.device(), &shaderModuleDescriptor);
 
-    WGPUBindGroupLayoutEntry bindGroupLayoutEntry[1];
-    bindGroupLayoutEntry[0].nextInChain = nullptr;
-    bindGroupLayoutEntry[0].binding = 0;
-    bindGroupLayoutEntry[0].visibility = WGPUShaderStage_Vertex;
-    bindGroupLayoutEntry[0].buffer.nextInChain = nullptr;
-    bindGroupLayoutEntry[0].buffer.type = WGPUBufferBindingType_Uniform;
-    bindGroupLayoutEntry[0].buffer.hasDynamicOffset = false;
-    bindGroupLayoutEntry[0].buffer.minBindingSize = 64;
-    bindGroupLayoutEntry[0].sampler.nextInChain = nullptr;
-    bindGroupLayoutEntry[0].sampler.type = WGPUSamplerBindingType_Undefined;
-    bindGroupLayoutEntry[0].texture.nextInChain = nullptr;
-    bindGroupLayoutEntry[0].texture.sampleType = WGPUTextureSampleType_Undefined;
-    bindGroupLayoutEntry[0].texture.multisampled = false;
-    bindGroupLayoutEntry[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
-    bindGroupLayoutEntry[0].storageTexture.nextInChain = nullptr;
-    bindGroupLayoutEntry[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
-    bindGroupLayoutEntry[0].storageTexture.format = WGPUTextureFormat_Undefined;
-    bindGroupLayoutEntry[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+    WGPUBindGroupLayoutEntry cameraBindGroupLayoutEntry[1];
+    cameraBindGroupLayoutEntry[0].nextInChain = nullptr;
+    cameraBindGroupLayoutEntry[0].binding = 0;
+    cameraBindGroupLayoutEntry[0].visibility = WGPUShaderStage_Vertex;
+    cameraBindGroupLayoutEntry[0].buffer.nextInChain = nullptr;
+    cameraBindGroupLayoutEntry[0].buffer.type = WGPUBufferBindingType_Uniform;
+    cameraBindGroupLayoutEntry[0].buffer.hasDynamicOffset = false;
+    cameraBindGroupLayoutEntry[0].buffer.minBindingSize = 64;
+    cameraBindGroupLayoutEntry[0].sampler.nextInChain = nullptr;
+    cameraBindGroupLayoutEntry[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    cameraBindGroupLayoutEntry[0].texture.nextInChain = nullptr;
+    cameraBindGroupLayoutEntry[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    cameraBindGroupLayoutEntry[0].texture.multisampled = false;
+    cameraBindGroupLayoutEntry[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    cameraBindGroupLayoutEntry[0].storageTexture.nextInChain = nullptr;
+    cameraBindGroupLayoutEntry[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    cameraBindGroupLayoutEntry[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    cameraBindGroupLayoutEntry[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
-    WGPUBindGroupLayoutDescriptor bindGroupLayoutDescriptor;
-    bindGroupLayoutDescriptor.nextInChain = nullptr;
-    bindGroupLayoutDescriptor.label = nullptr;
-    bindGroupLayoutDescriptor.entryCount = 1;
-    bindGroupLayoutDescriptor.entries = bindGroupLayoutEntry;
+    WGPUBindGroupLayoutDescriptor cameraBindGroupLayoutDescriptor;
+    cameraBindGroupLayoutDescriptor.nextInChain = nullptr;
+    cameraBindGroupLayoutDescriptor.label = nullptr;
+    cameraBindGroupLayoutDescriptor.entryCount = 1;
+    cameraBindGroupLayoutDescriptor.entries = cameraBindGroupLayoutEntry;
 
-    WGPUBindGroupLayout bindGroupLayout = wgpuDeviceCreateBindGroupLayout(application.device(), &bindGroupLayoutDescriptor);
+    WGPUBindGroupLayoutEntry modelBindGroupLayoutEntry[1];
+    modelBindGroupLayoutEntry[0].nextInChain = nullptr;
+    modelBindGroupLayoutEntry[0].binding = 0;
+    modelBindGroupLayoutEntry[0].visibility = WGPUShaderStage_Vertex;
+    modelBindGroupLayoutEntry[0].buffer.nextInChain = nullptr;
+    modelBindGroupLayoutEntry[0].buffer.type = WGPUBufferBindingType_Uniform;
+    modelBindGroupLayoutEntry[0].buffer.hasDynamicOffset = false;
+    modelBindGroupLayoutEntry[0].buffer.minBindingSize = 64;
+    modelBindGroupLayoutEntry[0].sampler.nextInChain = nullptr;
+    modelBindGroupLayoutEntry[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    modelBindGroupLayoutEntry[0].texture.nextInChain = nullptr;
+    modelBindGroupLayoutEntry[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    modelBindGroupLayoutEntry[0].texture.multisampled = false;
+    modelBindGroupLayoutEntry[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    modelBindGroupLayoutEntry[0].storageTexture.nextInChain = nullptr;
+    modelBindGroupLayoutEntry[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    modelBindGroupLayoutEntry[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    modelBindGroupLayoutEntry[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor modelBindGroupLayoutDescriptor;
+    modelBindGroupLayoutDescriptor.nextInChain = nullptr;
+    modelBindGroupLayoutDescriptor.label = nullptr;
+    modelBindGroupLayoutDescriptor.entryCount = 1;
+    modelBindGroupLayoutDescriptor.entries = modelBindGroupLayoutEntry;
+
+    WGPUBindGroupLayout bindGroupLayouts[2];
+    bindGroupLayouts[0] = wgpuDeviceCreateBindGroupLayout(application.device(), &cameraBindGroupLayoutDescriptor);
+    bindGroupLayouts[1] = wgpuDeviceCreateBindGroupLayout(application.device(), &modelBindGroupLayoutDescriptor);
 
     WGPUPipelineLayoutDescriptor pipelineLayoutDescriptor;
     pipelineLayoutDescriptor.nextInChain = nullptr;
     pipelineLayoutDescriptor.label = nullptr;
-    pipelineLayoutDescriptor.bindGroupLayoutCount = 1;
-    pipelineLayoutDescriptor.bindGroupLayouts = &bindGroupLayout;
+    pipelineLayoutDescriptor.bindGroupLayoutCount = 2;
+    pipelineLayoutDescriptor.bindGroupLayouts = bindGroupLayouts;
 
     WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(application.device(), &pipelineLayoutDescriptor);
 
@@ -244,8 +283,17 @@ int main()
         std::vector<Vertex> vertices;
         std::vector<std::uint16_t> indices;
 
-        for (auto const & mesh : asset.meshes)
+        for (auto const & node : asset.nodes)
         {
+            if (!node.mesh) continue;
+
+            glm::mat4 nodeModelMatrix =
+                glm::scale(node.scale) *
+                glm::toMat4(node.rotation) *
+                glm::translate(node.translation);
+
+            auto const & mesh = asset.meshes[*node.mesh];
+
             for (auto const & primitive : mesh.primitives)
             {
                 if (!primitive.attributes.position) continue;
@@ -283,6 +331,7 @@ int main()
                 renderObject.indexByteLength = indexAccessor.count * sizeof(indices[0]);
                 renderObject.indexCount = indexAccessor.count;
                 renderObject.indexFormat = WGPUIndexFormat_Uint16;
+                renderObject.modelMatrix = nodeModelMatrix;
 
                 auto const & positionBufferView = asset.bufferViews[positionAccessor.bufferView];
                 auto const &   normalBufferView = asset.bufferViews[  normalAccessor.bufferView];
@@ -336,32 +385,59 @@ int main()
         wgpuQueueWriteBuffer(application.queue(), indexBuffer, 0, indices.data(), indices.size() * sizeof(indices[0]));
     }
 
-    WGPUBufferDescriptor uniformBufferDescriptor;
-    uniformBufferDescriptor.nextInChain = nullptr;
-    uniformBufferDescriptor.label = nullptr;
-    uniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
-    uniformBufferDescriptor.size = 64;
-    uniformBufferDescriptor.mappedAtCreation = false;
+    WGPUBufferDescriptor cameraUniformBufferDescriptor;
+    cameraUniformBufferDescriptor.nextInChain = nullptr;
+    cameraUniformBufferDescriptor.label = nullptr;
+    cameraUniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+    cameraUniformBufferDescriptor.size = 64;
+    cameraUniformBufferDescriptor.mappedAtCreation = false;
 
-    WGPUBuffer uniformBuffer = wgpuDeviceCreateBuffer(application.device(), &uniformBufferDescriptor);
+    WGPUBuffer cameraUniformBuffer = wgpuDeviceCreateBuffer(application.device(), &cameraUniformBufferDescriptor);
 
-    WGPUBindGroupEntry bindGroupEntry;
-    bindGroupEntry.nextInChain = nullptr;
-    bindGroupEntry.binding = 0;
-    bindGroupEntry.buffer = uniformBuffer;
-    bindGroupEntry.offset = 0;
-    bindGroupEntry.size = 64;
-    bindGroupEntry.sampler = nullptr;
-    bindGroupEntry.textureView = nullptr;
+    WGPUBufferDescriptor modelUniformBufferDescriptor;
+    modelUniformBufferDescriptor.nextInChain = nullptr;
+    modelUniformBufferDescriptor.label = nullptr;
+    modelUniformBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+    modelUniformBufferDescriptor.size = 64;
+    modelUniformBufferDescriptor.mappedAtCreation = false;
 
-    WGPUBindGroupDescriptor bindGroupDescriptor;
-    bindGroupDescriptor.nextInChain = nullptr;
-    bindGroupDescriptor.label = nullptr;
-    bindGroupDescriptor.layout = bindGroupLayout;
-    bindGroupDescriptor.entryCount = 1;
-    bindGroupDescriptor.entries = &bindGroupEntry;
+    WGPUBuffer modelUniformBuffer = wgpuDeviceCreateBuffer(application.device(), &modelUniformBufferDescriptor);
 
-    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(application.device(), &bindGroupDescriptor);
+    WGPUBindGroupEntry cameraBindGroupEntry;
+    cameraBindGroupEntry.nextInChain = nullptr;
+    cameraBindGroupEntry.binding = 0;
+    cameraBindGroupEntry.buffer = cameraUniformBuffer;
+    cameraBindGroupEntry.offset = 0;
+    cameraBindGroupEntry.size = 64;
+    cameraBindGroupEntry.sampler = nullptr;
+    cameraBindGroupEntry.textureView = nullptr;
+
+    WGPUBindGroupDescriptor cameraBindGroupDescriptor;
+    cameraBindGroupDescriptor.nextInChain = nullptr;
+    cameraBindGroupDescriptor.label = nullptr;
+    cameraBindGroupDescriptor.layout = bindGroupLayouts[0];
+    cameraBindGroupDescriptor.entryCount = 1;
+    cameraBindGroupDescriptor.entries = &cameraBindGroupEntry;
+
+    WGPUBindGroupEntry modelBindGroupEntry;
+    modelBindGroupEntry.nextInChain = nullptr;
+    modelBindGroupEntry.binding = 0;
+    modelBindGroupEntry.buffer = modelUniformBuffer;
+    modelBindGroupEntry.offset = 0;
+    modelBindGroupEntry.size = 64;
+    modelBindGroupEntry.sampler = nullptr;
+    modelBindGroupEntry.textureView = nullptr;
+
+    WGPUBindGroupDescriptor modelBindGroupDescriptor;
+    modelBindGroupDescriptor.nextInChain = nullptr;
+    modelBindGroupDescriptor.label = nullptr;
+    modelBindGroupDescriptor.layout = bindGroupLayouts[1];
+    modelBindGroupDescriptor.entryCount = 1;
+    modelBindGroupDescriptor.entries = &modelBindGroupEntry;
+
+    WGPUBindGroup bindGroups[2];
+    bindGroups[0] = wgpuDeviceCreateBindGroup(application.device(), &cameraBindGroupDescriptor);
+    bindGroups[1] = wgpuDeviceCreateBindGroup(application.device(), &modelBindGroupDescriptor);
 
     WGPUTexture depthTexture = nullptr;
     WGPUTextureView depthTextureView = nullptr;
@@ -431,7 +507,7 @@ int main()
 
         glm::mat4 const viewProjectionMatrix = camera.viewProjectionMatrix();
 
-        wgpuQueueWriteBuffer(application.queue(), uniformBuffer, 0, &viewProjectionMatrix, 64);
+        wgpuQueueWriteBuffer(application.queue(), cameraUniformBuffer, 0, &viewProjectionMatrix, 64);
 
         if (resized || !depthTexture)
         {
@@ -506,10 +582,13 @@ int main()
         WGPURenderPassEncoder renderPassEncoder = wgpuCommandEncoderBeginRenderPass(commandEncoder, &renderPassDescriptor);
 
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder, renderPipeline);
-        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, bindGroup, 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, bindGroups[0], 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 1, bindGroups[1], 0, nullptr);
 
         for (auto const & renderObject : renderObjects)
         {
+            wgpuQueueWriteBuffer(application.queue(), modelUniformBuffer, 0, &renderObject.modelMatrix, 64);
+
             wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, vertexBuffer, renderObject.vertexByteOffset, renderObject.vertexByteLength);
             wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder, indexBuffer, renderObject.indexFormat, renderObject.indexByteOffset, renderObject.indexByteLength);
             wgpuRenderPassEncoderDrawIndexed(renderPassEncoder, renderObject.indexCount, 1, 0, 0, 0);
