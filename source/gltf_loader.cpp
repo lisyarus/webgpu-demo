@@ -81,6 +81,9 @@ namespace glTF
                 if (primitiveIn.HasMember("indices"))
                     primitive.indices = primitiveIn["indices"].GetUint();
 
+                if (primitiveIn.HasMember("material"))
+                    primitive.material = primitiveIn["material"].GetUint();
+
                 auto const & attributes = primitiveIn["attributes"];
 
                 if (attributes.HasMember("POSITION"))
@@ -95,6 +98,49 @@ namespace glTF
                 if (attributes.HasMember("TEXCOORD_0"))
                     primitive.attributes.texcoord = attributes["TEXCOORD_0"].GetUint();
             }
+        }
+
+        if (document.HasMember("materials"))
+        for (auto const & materialIn : document["materials"].GetArray())
+        {
+            auto & material = result.materials.emplace_back();
+
+            material.baseColorFactor = glm::vec4(1.f);
+            material.metallicFactor = 1.f;
+            material.roughnessFactor = 1.f;
+            material.emissiveFactor = glm::vec3(0.f);
+
+            if (materialIn.HasMember("pbrMetallicRoughness"))
+            {
+                auto const & pbrMetallicRoughness = materialIn["pbrMetallicRoughness"];
+
+                if (pbrMetallicRoughness.HasMember("baseColorTexture"))
+                    material.baseColorTexture = pbrMetallicRoughness["baseColorTexture"]["index"].GetUint();
+
+                if (pbrMetallicRoughness.HasMember("metallicRoughnessTexture"))
+                    material.metallicRoughnessTexture = pbrMetallicRoughness["metallicRoughnessTexture"]["index"].GetUint();
+            }
+
+            if (materialIn.HasMember("normalTexture"))
+                material.normalTexture = materialIn["normalTexture"]["index"].GetUint();
+
+            if (materialIn.HasMember("occlusionTexture"))
+                material.occlusionTexture = materialIn["occlusionTexture"]["index"].GetUint();
+        }
+
+        if (document.HasMember("images"))
+        for (auto const & imageIn : document["images"].GetArray())
+        {
+            auto & image = result.images.emplace_back();
+            image.uri = imageIn["uri"].GetString();
+        }
+
+        if (document.HasMember("textures"))
+        for (auto const & textureIn : document["textures"].GetArray())
+        {
+            auto & texture = result.textures.emplace_back();
+            if (textureIn.HasMember("source"))
+                texture.source = textureIn["source"].GetUint();
         }
 
         if (document.HasMember("accessors"))

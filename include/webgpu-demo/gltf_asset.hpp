@@ -56,6 +56,33 @@ namespace glTF
         Type type;
     };
 
+    struct Image
+    {
+        std::string uri;
+    };
+
+    struct Texture
+    {
+        std::optional<std::uint32_t> source;
+    };
+
+    struct Material
+    {
+        glm::vec4 baseColorFactor;
+        std::optional<std::uint32_t> baseColorTexture;
+
+        float metallicFactor;
+        float roughnessFactor;
+        std::optional<std::uint32_t> metallicRoughnessTexture;
+
+        std::optional<std::uint32_t> normalTexture;
+
+        std::optional<std::uint32_t> occlusionTexture;
+
+        glm::vec3 emissiveFactor;
+        std::optional<std::uint32_t> emissiveTexture;
+    };
+
     struct Primitive
     {
         struct Attributes
@@ -80,6 +107,7 @@ namespace glTF
         Attributes attributes;
         std::optional<std::uint32_t> indices;
         Mode mode;
+        std::optional<std::uint32_t> material;
     };
 
     struct Mesh
@@ -103,6 +131,9 @@ namespace glTF
     {
         std::vector<Node> nodes;
         std::vector<Mesh> meshes;
+        std::vector<Material> materials;
+        std::vector<Texture> textures;
+        std::vector<Image> images;
         std::vector<Accessor> accessors;
         std::vector<BufferView> bufferViews;
         std::vector<Buffer> buffers;
