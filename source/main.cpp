@@ -2,9 +2,9 @@
 
 #include <webgpu-demo/sdl_wgpu.h>
 #include <webgpu-demo/application.hpp>
+#include <webgpu-demo/camera.hpp>
 
 #include <glm/glm.hpp>
-#include <glm/gtx/transform.hpp>
 
 #include <iostream>
 #include <vector>
@@ -258,14 +258,8 @@ int main()
     WGPUTexture depthTexture = nullptr;
     WGPUTextureView depthTextureView = nullptr;
 
-    glm::vec3 cameraPosition = glm::vec3(0.0, 0.0, 5.0);
-    float cameraXAngle = 0.f;
-    float cameraYAngle = 0.f;
-    float cameraXAngleTarget = 0.f;
-    float cameraYAngleTarget = 0.f;
-
-    float cameraSensitivity = 0.003f;
-    float cameraSpeed = 3.f;
+    Camera camera;
+    camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
 
     std::unordered_set<SDL_Scancode> keysDown;
 
@@ -290,13 +284,13 @@ int main()
             {
             case SDL_WINDOWEVENT_RESIZED:
                 application.resize(event->window.data1, event->window.data2);
+                camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
                 resized = true;
                 break;
             }
             break;
         case SDL_MOUSEMOTION:
-            cameraXAngleTarget += event->motion.xrel * cameraSensitivity;
-            cameraYAngleTarget += event->motion.yrel * cameraSensitivity;
+            camera.rotate(event->motion.xrel, event->motion.yrel);
             break;
         case SDL_KEYDOWN:
             keysDown.insert(event->key.keysym.scancode);
@@ -318,32 +312,14 @@ int main()
         time += dt;
         lastFrameStart = thisFrameStart;
 
-        cameraXAngle += (cameraXAngleTarget - cameraXAngle) * (1.f - std::exp(- dt * 20.f));
-        cameraYAngle += (cameraYAngleTarget - cameraYAngle) * (1.f - std::exp(- dt * 20.f));
+        camera.update(dt, {
+            .movingForward  = keysDown.contains(SDL_SCANCODE_W),
+            .movingBackward = keysDown.contains(SDL_SCANCODE_S),
+            .movingLeft     = keysDown.contains(SDL_SCANCODE_A),
+            .movingRight    = keysDown.contains(SDL_SCANCODE_D),
+        });
 
-        glm::vec3 cameraForward = glm::vec3(
-            std::cos(cameraYAngle) * std::sin(cameraXAngle), -std::sin(cameraYAngle), - std::cos(cameraYAngle) * std::cos(cameraXAngle)
-        );
-
-        glm::vec3 cameraRight = glm::vec3(
-           std::cos(cameraXAngle), 0.f, std::sin(cameraXAngle)
-       );
-
-        if (keysDown.contains(SDL_SCANCODE_W))
-            cameraPosition += cameraForward * cameraSpeed * dt;
-        if (keysDown.contains(SDL_SCANCODE_S))
-            cameraPosition -= cameraForward * cameraSpeed * dt;
-        if (keysDown.contains(SDL_SCANCODE_A))
-            cameraPosition -= cameraRight * cameraSpeed * dt;
-        if (keysDown.contains(SDL_SCANCODE_D))
-            cameraPosition += cameraRight * cameraSpeed * dt;
-
-        glm::mat4 viewMatrix =
-            glm::rotate(cameraYAngle, glm::vec3(1.0, 0.0, 0.0)) *
-            glm::rotate(cameraXAngle, glm::vec3(0.0, 1.0, 0.0)) *
-            glm::translate(-cameraPosition);
-        glm::mat4 projectionMatrix = glm::perspective(glm::radians(45.f), application.width() * 1.f / application.height(), 0.01f, 100.f);
-        glm::mat4 viewProjectionMatrix = projectionMatrix * viewMatrix;
+        glm::mat4 const viewProjectionMatrix = camera.viewProjectionMatrix();
 
         wgpuQueueWriteBuffer(application.queue(), uniformBuffer, 0, &viewProjectionMatrix, 64);
 
