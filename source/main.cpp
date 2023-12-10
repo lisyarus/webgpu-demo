@@ -124,9 +124,6 @@ fn tonemap(x : vec3f) -> vec3f {
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * material.baseColorFactor;
-    if (baseColorSample.a < 0.5) {
-        discard;
-    }
 
     let baseColor = baseColorSample.rgb;
 
@@ -138,6 +135,10 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let normal = tbn * normalize(2.0 * textureSample(normalTexture, textureSampler, in.texcoord).rgb - vec3(1.0));
 
     let materialSample = textureSample(metallicRoughnessTexture, textureSampler, in.texcoord);
+
+    if (baseColorSample.a < 0.5) {
+        discard;
+    }
 
     let metallic = materialSample.b * material.metallicFactor;
     let roughness = materialSample.g * material.roughnessFactor;
@@ -264,37 +265,76 @@ int main()
             sRGBViewFormat = WGPUTextureFormat_RGBA8UnormSrgb;
         }
 
-        textureDescriptor.mipLevelCount = 1;
+        textureDescriptor.mipLevelCount = std::floor(std::log2(std::max(imageInfo.width, imageInfo.height))) + 1;
         textureDescriptor.sampleCount = 1;
         textureDescriptor.viewFormatCount = sRGBViewFormat ? 1 : 0;
         textureDescriptor.viewFormats = sRGBViewFormat ? &(*sRGBViewFormat) : nullptr;
 
         texture = wgpuDeviceCreateTexture(application.device(), &textureDescriptor);
 
-        WGPUImageCopyTexture imageCopyTexture;
-        imageCopyTexture.nextInChain = nullptr;
-        imageCopyTexture.texture = texture;
-        imageCopyTexture.mipLevel = 0;
-        imageCopyTexture.origin = {0, 0, 0};
-        imageCopyTexture.aspect = WGPUTextureAspect_All;
+        std::vector<unsigned char> levelPixels;
+        int levelWidth = imageInfo.width;
+        int levelHeight = imageInfo.height;
 
-        WGPUTextureDataLayout textureDataLayout;
-        textureDataLayout.nextInChain = nullptr;
-        textureDataLayout.offset = 0;
-        textureDataLayout.bytesPerRow = imageInfo.width * imageInfo.channels;
-        textureDataLayout.rowsPerImage = imageInfo.height;
+        for (int i = 0; i < textureDescriptor.mipLevelCount; ++i)
+        {
+            if (levelPixels.empty())
+            {
+                levelPixels.assign(imageInfo.data.get(), imageInfo.data.get() + imageInfo.width * imageInfo.height * imageInfo.channels);
+            }
+            else
+            {
+                int newLevelWidth = levelWidth / 2;
+                int newLevelHeight = levelHeight / 2;
+                std::vector<unsigned char> newLevelPixels(newLevelWidth * newLevelHeight * imageInfo.channels, 0);
 
-        WGPUExtent3D writeSize;
-        writeSize.width = imageInfo.width;
-        writeSize.height = imageInfo.height;
-        writeSize.depthOrArrayLayers = 1;
+                for (int y = 0; y < newLevelHeight; ++y)
+                {
+                    for (int x = 0; x < newLevelWidth; ++x)
+                    {
+                        for (int c = 0; c < imageInfo.channels; ++c)
+                        {
+                            int sum = 0;
+                            sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
+                            sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
+                            sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
+                            sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
+                            newLevelPixels[(y * newLevelWidth + x) * imageInfo.channels + c] = sum >> 2;
+                        }
+                    }
+                }
 
-        wgpuQueueWriteTexture(application.queue(), &imageCopyTexture, imageInfo.data.get(), imageInfo.width * imageInfo.height * imageInfo.channels, &textureDataLayout, &writeSize);
+                levelHeight = newLevelHeight;
+                levelWidth = newLevelWidth;
+                levelPixels = std::move(newLevelPixels);
+            }
+
+            WGPUImageCopyTexture imageCopyTexture;
+            imageCopyTexture.nextInChain = nullptr;
+            imageCopyTexture.texture = texture;
+            imageCopyTexture.mipLevel = i;
+            imageCopyTexture.origin = {0, 0, 0};
+            imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+            WGPUTextureDataLayout textureDataLayout;
+            textureDataLayout.nextInChain = nullptr;
+            textureDataLayout.offset = 0;
+            textureDataLayout.bytesPerRow = levelWidth * imageInfo.channels;
+            textureDataLayout.rowsPerImage = levelHeight;
+
+            WGPUExtent3D writeSize;
+            writeSize.width = levelWidth;
+            writeSize.height = levelHeight;
+            writeSize.depthOrArrayLayers = 1;
+
+            wgpuQueueWriteTexture(application.queue(), &imageCopyTexture, levelPixels.data(), levelPixels.size(), &textureDataLayout, &writeSize);
+        }
     }
 
     auto createTextureView = [&](std::uint32_t textureId, bool sRGB)
     {
         WGPUTextureFormat format = wgpuTextureGetFormat(textures[textureId]);
+        int mipLevelsCount = wgpuTextureGetMipLevelCount(textures[textureId]);
 
         if (format == WGPUTextureFormat_RGBA8Unorm && sRGB)
             format = WGPUTextureFormat_RGBA8UnormSrgb;
@@ -305,7 +345,7 @@ int main()
         textureViewDescriptor.format = format;
         textureViewDescriptor.dimension = WGPUTextureViewDimension_2D;
         textureViewDescriptor.baseMipLevel = 0;
-        textureViewDescriptor.mipLevelCount = 1;
+        textureViewDescriptor.mipLevelCount = mipLevelsCount;
         textureViewDescriptor.baseArrayLayer = 0;
         textureViewDescriptor.arrayLayerCount = 1;
         textureViewDescriptor.aspect = WGPUTextureAspect_All;
@@ -786,11 +826,11 @@ int main()
     samplerDescriptor.addressModeW = WGPUAddressMode_MirrorRepeat;
     samplerDescriptor.magFilter = WGPUFilterMode_Linear;
     samplerDescriptor.minFilter = WGPUFilterMode_Linear;
-    samplerDescriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    samplerDescriptor.mipmapFilter = WGPUMipmapFilterMode_Linear;
     samplerDescriptor.lodMinClamp = 0.f;
-    samplerDescriptor.lodMaxClamp = 0.f;
+    samplerDescriptor.lodMaxClamp = 255.f;
     samplerDescriptor.compare = WGPUCompareFunction_Undefined;
-    samplerDescriptor.maxAnisotropy = 1;
+    samplerDescriptor.maxAnisotropy = 16;
 
     WGPUSampler sampler = wgpuDeviceCreateSampler(application.device(), &samplerDescriptor);
 
