@@ -425,6 +425,8 @@ int main()
             .movingBackward = keysDown.contains(SDL_SCANCODE_S),
             .movingLeft     = keysDown.contains(SDL_SCANCODE_A),
             .movingRight    = keysDown.contains(SDL_SCANCODE_D),
+            .movingFast     = keysDown.contains(SDL_SCANCODE_LSHIFT),
+            .movingSlow     = keysDown.contains(SDL_SCANCODE_LCTRL),
         });
 
         glm::mat4 const viewProjectionMatrix = camera.viewProjectionMatrix();

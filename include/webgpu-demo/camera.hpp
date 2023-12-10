@@ -10,6 +10,8 @@ struct Camera
         bool movingBackward;
         bool movingLeft;
         bool movingRight;
+        bool movingFast;
+        bool movingSlow;
     };
 
     void setFov(float fovY, float aspectRatio);
