@@ -176,7 +176,7 @@ Application::~Application()
     SDL_DestroyWindow(window_);
 }
 
-WGPUTextureView Application::nextSwapchainView()
+WGPUTexture Application::nextSwapchainTexture()
 {
     // Request the current swapchain texture, measuring the time it took
 
@@ -202,21 +202,7 @@ WGPUTextureView Application::nextSwapchainView()
     if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_Success)
         throw std::runtime_error("Can't get surface texture: " + std::to_string(surfaceTexture.status));
 
-    // Create a texture view from the swapchain texture
-    // This is the texture we'll render to
-
-    WGPUTextureViewDescriptor textureViewDescriptor;
-    textureViewDescriptor.nextInChain = nullptr;
-    textureViewDescriptor.label = nullptr;
-    textureViewDescriptor.format = surfaceFormat_;
-    textureViewDescriptor.dimension = WGPUTextureViewDimension_2D;
-    textureViewDescriptor.baseMipLevel = 0;
-    textureViewDescriptor.mipLevelCount = 1;
-    textureViewDescriptor.baseArrayLayer = 0;
-    textureViewDescriptor.arrayLayerCount = 1;
-    textureViewDescriptor.aspect = WGPUTextureAspect_All;
-
-    return wgpuTextureCreateView(surfaceTexture.texture, &textureViewDescriptor);
+    return surfaceTexture.texture;
 }
 
 void Application::resize(int width, int height)

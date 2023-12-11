@@ -34,7 +34,7 @@ struct Application
     // Returns null if the request timed out
     // Throws on error
     // The returned texture view needs to be released after rendering to it
-    WGPUTextureView nextSwapchainView();
+    WGPUTexture nextSwapchainTexture();
 
     // Must be called after rendering each frame
     void present();
