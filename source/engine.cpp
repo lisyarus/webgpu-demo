@@ -13,6 +13,17 @@
 namespace
 {
 
+    glm::mat4 glToVkProjection(glm::mat4 matrix)
+    {
+        // Map from [-1, 1] z-range in OpenGL to [0, 1] z-range in Vulkan, WebGPU, etc
+        // Equivalent to doing v.z = (v.z + v.w) / 2 after applying the matrix
+
+        for (int i = 0; i < 4; ++i)
+            matrix[i][2] = (matrix[i][2] + matrix[i][3]) / 2.f;
+
+        return matrix;
+    }
+
     struct Vertex
     {
         glm::vec3 position;
@@ -39,6 +50,11 @@ namespace
         float padding2[1];
     };
 
+    struct ShadowUniform
+    {
+        glm::mat4 projection;
+    };
+
     static const char mainShader[] =
 R"(
 
@@ -55,6 +71,10 @@ struct Material {
     emissiveFactor : vec3f,
 }
 
+struct Shadow {
+    projection : mat4x4f,
+}
+
 @group(0) @binding(0) var<uniform> camera: Camera;
 
 @group(1) @binding(0) var<uniform> model: mat4x4f;
@@ -64,6 +84,10 @@ struct Material {
 @group(2) @binding(2) var baseColorTexture: texture_2d<f32>;
 @group(2) @binding(3) var normalTexture: texture_2d<f32>;
 @group(2) @binding(4) var metallicRoughnessTexture: texture_2d<f32>;
+
+@group(3) @binding(0) var<uniform> shadow : Shadow;
+@group(3) @binding(1) var shadowSampler: sampler_comparison;
+@group(3) @binding(2) var shadowMapTexture: texture_depth_2d;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -148,9 +172,40 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let lightness = max(0.0, dot(normal, lightDirection));
     let specular = lightness * metallic * pow(max(0.0, dot(viewDirection, halfway)), 1.0 / max(0.0001, roughness * roughness));
 
-    let outColor = (ambientLight + (lightness + specular) * lightIntensity) * baseColor;
+    let shadowPositionClip = shadow.projection * vec4(in.worldPosition, 1.0);
+
+    let shadowPositionNdc = shadowPositionClip.xyz / shadowPositionClip.w;
+
+    let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z);
+
+    let outColor = (ambientLight + (lightness + specular) * shadowFactor * lightIntensity) * baseColor;
 
     return vec4f(tonemap(outColor), baseColorSample.a);
+}
+
+struct ShadowVertexInput {
+    @location(0) position : vec3f,
+    @location(1) texcoord : vec2f,
+}
+
+struct ShadowVertexOutput {
+    @builtin(position) position : vec4f,
+    @location(0) texcoord : vec2f,
+}
+
+@vertex
+fn shadowVertexMain(in : ShadowVertexInput) -> ShadowVertexOutput {
+    let position : vec4f = camera.viewProjection * model * vec4f(in.position, 1.0);
+    return ShadowVertexOutput(position, in.texcoord);
+}
+
+@fragment
+fn shadowFragmentMain(in : ShadowVertexOutput) {
+    let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord);
+
+    if (baseColorSample.a < 0.5) {
+        discard;
+    }
 }
 
 )";
@@ -334,6 +389,73 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
     }
 
+    WGPUBindGroupLayout createShadowBindGroupLayout(WGPUDevice device)
+    {
+        WGPUBindGroupLayoutEntry entries[3];
+
+        entries[0].nextInChain = nullptr;
+        entries[0].binding = 0;
+        entries[0].visibility = WGPUShaderStage_Fragment;
+        entries[0].buffer.nextInChain = nullptr;
+        entries[0].buffer.type = WGPUBufferBindingType_Uniform;
+        entries[0].buffer.hasDynamicOffset = false;
+        entries[0].buffer.minBindingSize = sizeof(ShadowUniform);
+        entries[0].sampler.nextInChain = nullptr;
+        entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+        entries[0].texture.nextInChain = nullptr;
+        entries[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+        entries[0].texture.multisampled = false;
+        entries[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+        entries[0].storageTexture.nextInChain = nullptr;
+        entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+        entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+        entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+        entries[1].nextInChain = nullptr;
+        entries[1].binding = 1;
+        entries[1].visibility = WGPUShaderStage_Fragment;
+        entries[1].buffer.nextInChain = nullptr;
+        entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+        entries[1].buffer.hasDynamicOffset = false;
+        entries[1].buffer.minBindingSize = 0;
+        entries[1].sampler.nextInChain = nullptr;
+        entries[1].sampler.type = WGPUSamplerBindingType_Comparison;
+        entries[1].texture.nextInChain = nullptr;
+        entries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
+        entries[1].texture.multisampled = false;
+        entries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+        entries[1].storageTexture.nextInChain = nullptr;
+        entries[1].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+        entries[1].storageTexture.format = WGPUTextureFormat_Undefined;
+        entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+        entries[2].nextInChain = nullptr;
+        entries[2].binding = 2;
+        entries[2].visibility = WGPUShaderStage_Fragment;
+        entries[2].buffer.nextInChain = nullptr;
+        entries[2].buffer.type = WGPUBufferBindingType_Undefined;
+        entries[2].buffer.hasDynamicOffset = false;
+        entries[2].buffer.minBindingSize = 0;
+        entries[2].sampler.nextInChain = nullptr;
+        entries[2].sampler.type = WGPUSamplerBindingType_Undefined;
+        entries[2].texture.nextInChain = nullptr;
+        entries[2].texture.sampleType = WGPUTextureSampleType_Depth;
+        entries[2].texture.multisampled = false;
+        entries[2].texture.viewDimension = WGPUTextureViewDimension_2D;
+        entries[2].storageTexture.nextInChain = nullptr;
+        entries[2].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+        entries[2].storageTexture.format = WGPUTextureFormat_Undefined;
+        entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+        WGPUBindGroupLayoutDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.entryCount = 3;
+        descriptor.entries = entries;
+
+        return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+    }
+
     WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
     {
         WGPUPipelineLayoutDescriptor descriptor;
@@ -345,10 +467,8 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         return wgpuDeviceCreatePipelineLayout(device, &descriptor);
     }
 
-    WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat)
+    WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule)
     {
-        WGPUShaderModule shaderModule = createShaderModule(device, mainShader);;
-
         WGPUColorTargetState colorTargetState;
         colorTargetState.nextInChain = nullptr;
         colorTargetState.format = surfaceFormat;
@@ -429,6 +549,76 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         return wgpuDeviceCreateRenderPipeline(device, &descriptor);
     }
 
+    WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+    {
+        WGPUFragmentState fragmentState;
+        fragmentState.nextInChain = nullptr;
+        fragmentState.module = shaderModule;
+        fragmentState.entryPoint = "shadowFragmentMain";
+        fragmentState.constantCount = 0;
+        fragmentState.constants = nullptr;
+        fragmentState.targetCount = 0;
+        fragmentState.targets = nullptr;
+
+        WGPUVertexAttribute attributes[2];
+        attributes[0].format = WGPUVertexFormat_Float32x3;
+        attributes[0].offset = 0;
+        attributes[0].shaderLocation = 0;
+        attributes[1].format = WGPUVertexFormat_Float32x2;
+        attributes[1].offset = 40;
+        attributes[1].shaderLocation = 1;
+
+        WGPUVertexBufferLayout vertexBufferLayout;
+        vertexBufferLayout.arrayStride = sizeof(Vertex);
+        vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+        vertexBufferLayout.attributeCount = 2;
+        vertexBufferLayout.attributes = attributes;
+
+        WGPUDepthStencilState depthStencilState;
+        depthStencilState.nextInChain = nullptr;
+        depthStencilState.format = WGPUTextureFormat_Depth24Plus;
+        depthStencilState.depthWriteEnabled = true;
+        depthStencilState.depthCompare = WGPUCompareFunction_Less;
+        depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
+        depthStencilState.stencilFront.failOp = WGPUStencilOperation_Keep;
+        depthStencilState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+        depthStencilState.stencilFront.passOp = WGPUStencilOperation_Keep;
+        depthStencilState.stencilBack.compare = WGPUCompareFunction_Always;
+        depthStencilState.stencilBack.failOp = WGPUStencilOperation_Keep;
+        depthStencilState.stencilBack.depthFailOp = WGPUStencilOperation_Keep;
+        depthStencilState.stencilBack.passOp = WGPUStencilOperation_Keep;
+        depthStencilState.stencilReadMask = 0;
+        depthStencilState.stencilWriteMask = 0;
+        depthStencilState.depthBias = 0;
+        depthStencilState.depthBiasSlopeScale = 0.f;
+        depthStencilState.depthBiasClamp = 0.f;
+
+        WGPURenderPipelineDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.layout = pipelineLayout;
+        descriptor.nextInChain = nullptr;
+        descriptor.vertex.module = shaderModule;
+        descriptor.vertex.entryPoint = "shadowVertexMain";
+        descriptor.vertex.constantCount = 0;
+        descriptor.vertex.constants = nullptr;
+        descriptor.vertex.bufferCount = 1;
+        descriptor.vertex.buffers = &vertexBufferLayout;
+        descriptor.primitive.nextInChain = nullptr;
+        descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+        descriptor.primitive.frontFace = WGPUFrontFace_CCW;
+        descriptor.primitive.cullMode = WGPUCullMode_None;
+        descriptor.depthStencil = &depthStencilState;
+        descriptor.multisample.nextInChain = nullptr;
+        descriptor.multisample.count = 1;
+        descriptor.multisample.mask = -1;
+        descriptor.multisample.alphaToCoverageEnabled = false;
+        descriptor.fragment = &fragmentState;
+
+        return wgpuDeviceCreateRenderPipeline(device, &descriptor);
+    }
+
     WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
     {
         WGPUBufferDescriptor descriptor;
@@ -479,6 +669,44 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         descriptor.layout = bindGroupLayout;
         descriptor.entryCount = 1;
         descriptor.entries = &bindGroupEntry;
+
+        return wgpuDeviceCreateBindGroup(device, &descriptor);
+    }
+
+    WGPUBindGroup createShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUSampler shadowSampler, WGPUTextureView shadowMapView)
+    {
+        WGPUBindGroupEntry bindGroupEntries[3];
+
+        bindGroupEntries[0].nextInChain = nullptr;
+        bindGroupEntries[0].binding = 0;
+        bindGroupEntries[0].buffer = uniformBuffer;
+        bindGroupEntries[0].offset = 0;
+        bindGroupEntries[0].size = sizeof(ShadowUniform);
+        bindGroupEntries[0].sampler = nullptr;
+        bindGroupEntries[0].textureView = nullptr;
+
+        bindGroupEntries[1].nextInChain = nullptr;
+        bindGroupEntries[1].binding = 1;
+        bindGroupEntries[1].buffer = nullptr;
+        bindGroupEntries[1].offset = 0;
+        bindGroupEntries[1].size = 0;
+        bindGroupEntries[1].sampler = shadowSampler;
+        bindGroupEntries[1].textureView = nullptr;
+
+        bindGroupEntries[2].nextInChain = nullptr;
+        bindGroupEntries[2].binding = 2;
+        bindGroupEntries[2].buffer = nullptr;
+        bindGroupEntries[2].offset = 0;
+        bindGroupEntries[2].size = 0;
+        bindGroupEntries[2].sampler = nullptr;
+        bindGroupEntries[2].textureView = shadowMapView;
+
+        WGPUBindGroupDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.layout = bindGroupLayout;
+        descriptor.entryCount = 3;
+        descriptor.entries = bindGroupEntries;
 
         return wgpuDeviceCreateBindGroup(device, &descriptor);
     }
@@ -541,6 +769,31 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
     }
 
+    WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView depthTarget)
+    {
+        WGPURenderPassDepthStencilAttachment depthStencilAttachment;
+        depthStencilAttachment.view = depthTarget;
+        depthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+        depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+        depthStencilAttachment.depthClearValue = 1.f;
+        depthStencilAttachment.depthReadOnly = false;
+        depthStencilAttachment.stencilLoadOp = WGPULoadOp_Undefined;
+        depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Undefined;
+        depthStencilAttachment.stencilClearValue = 0;
+        depthStencilAttachment.stencilReadOnly = true;
+
+        WGPURenderPassDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.colorAttachmentCount = 0;
+        descriptor.colorAttachments = nullptr;
+        descriptor.depthStencilAttachment = &depthStencilAttachment;
+        descriptor.occlusionQuerySet = nullptr;
+        descriptor.timestampWrites = nullptr;
+
+        return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
+    }
+
     WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder)
     {
         WGPUCommandBufferDescriptor descriptor;
@@ -565,6 +818,25 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         descriptor.lodMaxClamp = 255.f;
         descriptor.compare = WGPUCompareFunction_Undefined;
         descriptor.maxAnisotropy = 16;
+
+        return wgpuDeviceCreateSampler(device, &descriptor);
+    }
+
+    WGPUSampler createShadowSampler(WGPUDevice device)
+    {
+        WGPUSamplerDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.addressModeU = WGPUAddressMode_MirrorRepeat;
+        descriptor.addressModeV = WGPUAddressMode_MirrorRepeat;
+        descriptor.addressModeW = WGPUAddressMode_MirrorRepeat;
+        descriptor.magFilter = WGPUFilterMode_Linear;
+        descriptor.minFilter = WGPUFilterMode_Linear;
+        descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+        descriptor.lodMinClamp = 0.f;
+        descriptor.lodMaxClamp = 0.f;
+        descriptor.compare = WGPUCompareFunction_LessEqual;
+        descriptor.maxAnisotropy = 1;
 
         return wgpuDeviceCreateSampler(device, &descriptor);
     }
@@ -610,6 +882,23 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         wgpuQueueWriteTexture(queue, &imageCopyTexture, pixels.data(), pixels.size(), &textureDataLayout, &writeSize);
 
         return texture;
+    }
+
+    WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size)
+    {
+        WGPUTextureDescriptor textureDescriptor;
+        textureDescriptor.nextInChain = nullptr;
+        textureDescriptor.label = nullptr;
+        textureDescriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+        textureDescriptor.dimension = WGPUTextureDimension_2D;
+        textureDescriptor.size = {size, size, 1};
+        textureDescriptor.format = WGPUTextureFormat_Depth24Plus;
+        textureDescriptor.mipLevelCount = 1;
+        textureDescriptor.sampleCount = 1;
+        textureDescriptor.viewFormatCount = 0;
+        textureDescriptor.viewFormats = nullptr;
+
+        return wgpuDeviceCreateTexture(device, &textureDescriptor);
     }
 
     struct RenderObjectCommon
@@ -687,8 +976,7 @@ struct RenderObject
     WGPUIndexFormat indexFormat;
 
     glm::mat4 modelMatrix;
-    glm::vec3 bboxMin;
-    glm::vec3 bboxMax;
+    Box bbox;
 
     struct Material
     {
@@ -785,29 +1073,44 @@ private:
     WGPUBindGroupLayout cameraBindGroupLayout_;
     WGPUBindGroupLayout modelBindGroupLayout_;
     WGPUBindGroupLayout materialBindGroupLayout_;
+    WGPUBindGroupLayout shadowBindGroupLayout_;
+
+    WGPUShaderModule shaderModule_;
+
+    WGPUTexture shadowMap_;
+    WGPUTextureView shadowMapView_;
+
+    WGPUSampler defaultSampler_;
+    WGPUSampler shadowSampler_;
 
     WGPUPipelineLayout mainPipelineLayout_;
     WGPURenderPipeline mainPipeline_;
+    WGPUPipelineLayout shadowPipelineLayout_;
+    WGPURenderPipeline shadowPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer modelUniformBuffer_;
     WGPUBuffer materialUniformBuffer_;
+    WGPUBuffer shadowUniformBuffer_;
 
     WGPUBindGroup cameraBindGroup_;
     WGPUBindGroup modelBindGroup_;
+    WGPUBindGroup shadowBindGroup_;
 
     WGPUTexture frameTexture_;
     WGPUTextureView frameTextureView_;
     WGPUTexture depthTexture_;
     WGPUTextureView depthTextureView_;
 
-    WGPUSampler defaultSampler_;
     WGPUTexture whiteTexture_;
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
     void updateCameraUniformBuffer(Camera const & camera);
+    glm::mat4 computeShadowProjection();
+    void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
+    void updateShadowUniformBuffer(glm::mat4 const & shadowProjection);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
 };
@@ -819,18 +1122,27 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
     , modelBindGroupLayout_(createModelBindGroupLayout(device_))
     , materialBindGroupLayout_(createMaterialBindGroupLayout(device_))
-    , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, modelBindGroupLayout_, materialBindGroupLayout_}))
+    , shadowBindGroupLayout_(createShadowBindGroupLayout(device_))
+    , shaderModule_(createShaderModule(device_, mainShader))
+    , shadowMap_(createShadowMapTexture(device_, 4096))
+    , shadowMapView_(createTextureView(shadowMap_))
+    , defaultSampler_(createDefaultSampler(device_))
+    , shadowSampler_(createShadowSampler(device_))
+    , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, modelBindGroupLayout_, materialBindGroupLayout_, shadowBindGroupLayout_}))
     , mainPipeline_(nullptr)
+    , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, modelBindGroupLayout_, materialBindGroupLayout_}))
+    , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , modelUniformBuffer_(createUniformBuffer(device_, sizeof(glm::mat4)))
     , materialUniformBuffer_(createUniformBuffer(device_, sizeof(MaterialUniform)))
+    , shadowUniformBuffer_(createUniformBuffer(device_, sizeof(ShadowUniform)))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , modelBindGroup_(createModelBindGroup(device_, modelBindGroupLayout_, modelUniformBuffer_))
+    , shadowBindGroup_(createShadowBindGroup(device_, shadowBindGroupLayout_, shadowUniformBuffer_, shadowSampler_, shadowMapView_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
     , depthTextureView_(nullptr)
-    , defaultSampler_(createDefaultSampler(device_))
     , whiteTexture_(createWhiteTexture(device_, queue_))
 {}
 
@@ -841,18 +1153,27 @@ Engine::Impl::~Impl()
     loaderThread_.join();
 
     wgpuTextureRelease(whiteTexture_);
-    wgpuSamplerRelease(defaultSampler_);
     wgpuTextureViewRelease(depthTextureView_);
     wgpuTextureRelease(depthTexture_);
     wgpuTextureViewRelease(frameTextureView_);
     wgpuTextureRelease(frameTexture_);
+    wgpuBindGroupRelease(shadowBindGroup_);
     wgpuBindGroupRelease(modelBindGroup_);
     wgpuBindGroupRelease(cameraBindGroup_);
+    wgpuBufferRelease(shadowUniformBuffer_);
     wgpuBufferRelease(materialUniformBuffer_);
     wgpuBufferRelease(modelUniformBuffer_);
     wgpuBufferRelease(cameraUniformBuffer_);
+    wgpuRenderPipelineRelease(shadowPipeline_);
+    wgpuPipelineLayoutRelease(shadowPipelineLayout_);
     wgpuRenderPipelineRelease(mainPipeline_);
     wgpuPipelineLayoutRelease(mainPipelineLayout_);
+    wgpuSamplerRelease(shadowSampler_);
+    wgpuSamplerRelease(defaultSampler_);
+    wgpuTextureViewRelease(shadowMapView_);
+    wgpuTextureRelease(shadowMap_);
+    wgpuShaderModuleRelease(shaderModule_);
+    wgpuBindGroupLayoutRelease(shadowBindGroupLayout_);
     wgpuBindGroupLayoutRelease(materialBindGroupLayout_);
     wgpuBindGroupLayoutRelease(modelBindGroupLayout_);
     wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
@@ -866,36 +1187,72 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPUTextureFormat surfaceFormat = wgpuTextureGetFormat(target);
 
     if (!mainPipeline_)
-        mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, surfaceFormat);
+        mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, surfaceFormat, shaderModule_);
 
     updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)}, surfaceFormat);
-    updateCameraUniformBuffer(camera);
 
     WGPUTextureView targetView = createTextureView(target);
-    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+    WGPUCommandEncoder shadowCommandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPassEncoder = createMainRenderPass(commandEncoder, frameTextureView_, depthTextureView_, targetView, {0.8f, 0.9f, 1.f, 1.f});
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder, mainPipeline_);
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, cameraBindGroup_, 0, nullptr);
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 1, modelBindGroup_, 0, nullptr);
+    glm::mat4 shadowProjection = computeShadowProjection();
+
+    updateCameraUniformBufferShadow(shadowProjection);
+
+    WGPURenderPassEncoder shadowRenderPass = createShadowRenderPass(shadowCommandEncoder, shadowMapView_);
+
+    wgpuRenderPassEncoderSetPipeline(shadowRenderPass, shadowPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 0, cameraBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 1, modelBindGroup_, 0, nullptr);
 
     for (auto const & object : objects)
     {
+        // THIS IS WRONG: when the render pass is submitted to the queue, only the last
+        // object's model & material uniforms are used
+        // TODO: write them beforehand into a separate buffer, use dynamic offsets to
+        // select a particular object's data
         wgpuQueueWriteBuffer(queue_, modelUniformBuffer_, 0, &object->modelMatrix, 64);
         wgpuQueueWriteBuffer(queue_, materialUniformBuffer_, 0, &object->material.uniforms, sizeof(MaterialUniform));
 
-        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 2, object->materialBindGroup, 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 2, object->materialBindGroup, 0, nullptr);
 
-        wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
-        wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
-        wgpuRenderPassEncoderDrawIndexed(renderPassEncoder, object->indexCount, 1, 0, 0, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(shadowRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
+        wgpuRenderPassEncoderSetIndexBuffer(shadowRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
+        wgpuRenderPassEncoderDrawIndexed(shadowRenderPass, object->indexCount, 1, 0, 0, 0);
     }
 
-    wgpuRenderPassEncoderEnd(renderPassEncoder);
+    wgpuRenderPassEncoderEnd(shadowRenderPass);
 
-    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    auto shadowCommandBuffer = commandEncoderFinish(shadowCommandEncoder);
+    wgpuQueueSubmit(queue_, 1, &shadowCommandBuffer);
 
-    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+    WGPUCommandEncoder mainCommandEncoder = createCommandEncoder(device_);
+
+    updateCameraUniformBuffer(camera);
+    updateShadowUniformBuffer(shadowProjection);
+
+    WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, {0.8f, 0.9f, 1.f, 1.f});
+    wgpuRenderPassEncoderSetPipeline(mainRenderPass, mainPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 0, cameraBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 1, modelBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 3, shadowBindGroup_, 0, nullptr);
+
+    for (auto const & object : objects)
+    {
+        // THIS IS WRONG: see above
+        wgpuQueueWriteBuffer(queue_, modelUniformBuffer_, 0, &object->modelMatrix, 64);
+        wgpuQueueWriteBuffer(queue_, materialUniformBuffer_, 0, &object->material.uniforms, sizeof(MaterialUniform));
+
+        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 2, object->materialBindGroup, 0, nullptr);
+
+        wgpuRenderPassEncoderSetVertexBuffer(mainRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
+        wgpuRenderPassEncoderSetIndexBuffer(mainRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
+        wgpuRenderPassEncoderDrawIndexed(mainRenderPass, object->indexCount, 1, 0, 0, 0);
+    }
+
+    wgpuRenderPassEncoderEnd(mainRenderPass);
+
+    auto mainCommandBuffer = commandEncoderFinish(mainCommandEncoder);
+    wgpuQueueSubmit(queue_, 1, &mainCommandBuffer);
 
     wgpuTextureViewRelease(targetView);
 }
@@ -984,8 +1341,6 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 renderObject->indexCount = indexAccessor.count;
                 renderObject->indexFormat = WGPUIndexFormat_Uint16;
                 renderObject->modelMatrix = nodeModelMatrix;
-                renderObject->bboxMin = glm::vec3( std::numeric_limits<float>::infinity());
-                renderObject->bboxMax = glm::vec3(-std::numeric_limits<float>::infinity());
 
                 renderObject->material.uniforms.baseColorFactor = materialIn.baseColorFactor;
                 renderObject->material.uniforms.metallicFactor = materialIn.metallicFactor;
@@ -1025,8 +1380,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
                     auto transformedVertex = glm::vec3((renderObject->modelMatrix * glm::vec4(vertices.back().position, 1.f)));
 
-                    renderObject->bboxMin = glm::min(renderObject->bboxMin, transformedVertex);
-                    renderObject->bboxMax = glm::max(renderObject->bboxMax, transformedVertex);
+                    renderObject->bbox.expand(transformedVertex);
                 }
 
                 auto indexIterator = glTF::AccessorIterator<std::uint16_t>(assetBufferData.data() + indexBufferView.byteOffset + indexAccessor.byteOffset, indexBufferView.byteStride);
@@ -1119,11 +1473,39 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTe
 void Engine::Impl::updateCameraUniformBuffer(Camera const & camera)
 {
     CameraUniform cameraUniform;
-    cameraUniform.viewProjection = camera.viewProjectionMatrix();
+    cameraUniform.viewProjection = glToVkProjection(camera.viewProjectionMatrix());
     cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
     cameraUniform.position = camera.position();
 
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
+}
+
+glm::mat4 Engine::Impl::computeShadowProjection()
+{
+    glm::mat4 result = glm::mat4(0.f);
+    result[0][0] =  0.05f;
+    result[1][2] = -0.05f;
+    result[2][1] =  0.05f;
+    result[3][3] =  1.f;
+    return glToVkProjection(result);
+}
+
+void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection)
+{
+    CameraUniform cameraUniform;
+    cameraUniform.viewProjection = shadowProjection;
+    cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
+    cameraUniform.position = glm::vec3(0.f);
+
+    wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
+}
+
+void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection)
+{
+    ShadowUniform shadowUniform;
+    shadowUniform.projection = shadowProjection;
+
+    wgpuQueueWriteBuffer(queue_, shadowUniformBuffer_, 0, &shadowUniform, sizeof(ShadowUniform));
 }
 
 void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
@@ -1254,17 +1636,13 @@ void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & obj
     pimpl_->render(target, objects, camera);
 }
 
-std::pair<glm::vec3, glm::vec3> Engine::bbox(std::vector<RenderObjectPtr> const & objects) const
+Box Engine::bbox(std::vector<RenderObjectPtr> const & objects) const
 {
-    glm::vec3 min(  std::numeric_limits<float>::infinity());
-    glm::vec3 max(- std::numeric_limits<float>::infinity());
+    Box result;
 
     for (auto const & object : objects)
-    {
-        min = glm::min(min, object->bboxMin);
-        max = glm::max(max, object->bboxMax);
-    }
+        result.expand(object->bbox);
 
-    return {min, max};
+    return result;
 }
 

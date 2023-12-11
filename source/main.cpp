@@ -22,7 +22,7 @@ int main()
     camera.move({-11.f, 1.5f, -0.25f});
     camera.setRotation(glm::radians(90.f), 0.f);
     camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
-    float sceneDiagonal = glm::distance(sceneBbox.first, sceneBbox.second);
+    float sceneDiagonal = glm::distance(sceneBbox.min, sceneBbox.max);
     camera.setClip(sceneDiagonal / 1000.f, sceneDiagonal);
     camera.setSpeed(sceneDiagonal / 10.f);
 
