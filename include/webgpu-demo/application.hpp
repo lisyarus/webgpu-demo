@@ -29,7 +29,7 @@ struct Application
     int height() const { return height_; }
 
     // Must to be called whenever the window is resized
-    void resize(int width, int height);
+    void resize(int width, int height, bool vsync);
 
     // Returns null if the request timed out
     // Throws on error

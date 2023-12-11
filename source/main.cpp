@@ -33,6 +33,7 @@ int main()
 
     bool paused = false;
     bool day = true;
+    bool vsync = true;
 
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
@@ -51,7 +52,7 @@ int main()
             switch (event->window.event)
             {
             case SDL_WINDOWEVENT_RESIZED:
-                application.resize(event->window.data1, event->window.data2);
+                application.resize(event->window.data1, event->window.data2, vsync);
                 camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
                 resized = true;
                 break;
@@ -66,6 +67,11 @@ int main()
                 paused ^= true;
             if (event->key.keysym.scancode == SDL_SCANCODE_N)
                 day ^= true;
+            if (event->key.keysym.scancode == SDL_SCANCODE_V)
+            {
+                vsync ^= true;
+                application.resize(application.width(), application.height(), vsync);
+            }
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);

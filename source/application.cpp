@@ -156,7 +156,7 @@ Application::Application()
 
     // Configure the surface to be presented
 
-    resize(width_, height_);
+    resize(width_, height_, true);
 
     // Get the queue associated with the device
 
@@ -205,7 +205,7 @@ WGPUTexture Application::nextSwapchainTexture()
     return surfaceTexture.texture;
 }
 
-void Application::resize(int width, int height)
+void Application::resize(int width, int height, bool vsync)
 {
     width_ = width;
     height_ = height;
@@ -222,7 +222,7 @@ void Application::resize(int width, int height)
     surfaceConfiguration.alphaMode = WGPUCompositeAlphaMode_Auto;
     surfaceConfiguration.width = width_;
     surfaceConfiguration.height = height_;
-    surfaceConfiguration.presentMode = WGPUPresentMode_Fifo;
+    surfaceConfiguration.presentMode = vsync ? WGPUPresentMode_Fifo : WGPUPresentMode_Immediate;
 
     wgpuSurfaceConfigure(surface_, &surfaceConfiguration);
 
