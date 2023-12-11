@@ -32,6 +32,7 @@ int main()
     float time = 0.f;
 
     bool paused = false;
+    bool day = true;
 
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
@@ -63,6 +64,8 @@ int main()
             keysDown.insert(event->key.keysym.scancode);
             if (event->key.keysym.scancode == SDL_SCANCODE_SPACE)
                 paused ^= true;
+            if (event->key.keysym.scancode == SDL_SCANCODE_N)
+                day ^= true;
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);
@@ -91,7 +94,30 @@ int main()
             .movingSlow     = keysDown.contains(SDL_SCANCODE_LCTRL),
         });
 
-        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, time);
+        Engine::LightSettings lightSettings;
+
+        if (day)
+        {
+            lightSettings =
+            {
+                .skyColor = {0.4f, 0.7f, 1.f},
+                .ambientLight = {0.5f, 0.4f, 0.3f},
+                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
+                .sunIntensity = {10.f, 8.f, 6.f},
+            };
+        }
+        else
+        {
+            lightSettings =
+            {
+                .skyColor = {0.0f, 0.0f, 0.001f},
+                .ambientLight = {0.05f, 0.1f, 0.15f},
+                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
+                .sunIntensity = {1.f, 2.f, 3.f},
+            };
+        }
+
+        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, lightSettings);
 
         application.present();
 

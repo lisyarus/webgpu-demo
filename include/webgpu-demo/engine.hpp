@@ -43,7 +43,15 @@ struct Engine
 
     Box bbox(std::vector<RenderObjectPtr> const & objects) const;
 
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time);
+    struct LightSettings
+    {
+        glm::vec3 skyColor;
+        glm::vec3 ambientLight;
+        glm::vec3 sunDirection;
+        glm::vec3 sunIntensity;
+    };
+
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings);
 
 private:
     struct Impl;

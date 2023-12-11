@@ -53,8 +53,12 @@ namespace
     struct ShadowUniform
     {
         glm::mat4 projection;
-        glm::vec3 lightDirection;
+        glm::vec3 ambientLight;
         float padding1[1];
+        glm::vec3 lightDirection;
+        float padding2[1];
+        glm::vec3 lightIntensity;
+        float padding3[1];
     };
 
     static const char mainShader[] =
@@ -75,7 +79,9 @@ struct Material {
 
 struct Shadow {
     projection : mat4x4f,
+    ambientLight : vec3f,
     lightDirection : vec3f,
+    lightIntensity : vec3f,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -165,9 +171,6 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let metallic = materialSample.b * material.metallicFactor;
     let roughness = materialSample.g * material.roughnessFactor;
 
-    let ambientLight = vec3f(0.5);
-    let lightIntensity = vec3f(10.0, 8.0, 6.0);
-
     let viewDirection = normalize(camera.position - in.worldPosition);
     let halfway = normalize(shadow.lightDirection + viewDirection);
 
@@ -182,7 +185,7 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z - shadowBias);
 
-    let outColor = (ambientLight + (lightness + specular) * shadowFactor * lightIntensity) * baseColor;
+    let outColor = (shadow.ambientLight + (lightness + specular) * shadowFactor * shadow.lightIntensity) * baseColor;
 
     return vec4f(tonemap(outColor), baseColorSample.a);
 }
@@ -1070,7 +1073,7 @@ struct Engine::Impl
     Impl(WGPUDevice device, WGPUQueue queue);
     ~Impl();
 
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time);
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
 private:
@@ -1123,7 +1126,7 @@ private:
     void updateCameraUniformBuffer(Camera const & camera);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
-    void updateShadowUniformBuffer(glm::mat4 const & shadowProjection, glm::vec3 const & lightDirection);
+    void updateShadowUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
 };
@@ -1192,7 +1195,7 @@ Engine::Impl::~Impl()
     wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
 }
 
-void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time)
+void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings)
 {
     for (auto task : renderQueue_.grab())
         task();
@@ -1253,9 +1256,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPUTextureView targetView = createTextureView(target);
     WGPUCommandEncoder shadowCommandEncoder = createCommandEncoder(device_);
 
-    glm::vec3 lightDirection = glm::normalize(glm::vec3(std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)));
-
-    glm::mat4 shadowProjection = computeShadowProjection(lightDirection, sceneBbox);
+    glm::mat4 shadowProjection = computeShadowProjection(lightSettings.sunDirection, sceneBbox);
 
     updateCameraUniformBufferShadow(shadowProjection);
 
@@ -1286,9 +1287,9 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPUCommandEncoder mainCommandEncoder = createCommandEncoder(device_);
 
     updateCameraUniformBuffer(camera);
-    updateShadowUniformBuffer(shadowProjection, lightDirection);
+    updateShadowUniformBuffer(shadowProjection, lightSettings);
 
-    WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, {0.8f, 0.9f, 1.f, 1.f});
+    WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(lightSettings.skyColor, 1.f));
     wgpuRenderPassEncoderSetPipeline(mainRenderPass, mainPipeline_);
     wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 0, cameraBindGroup_, 0, nullptr);
     wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 3, shadowBindGroup_, 0, nullptr);
@@ -1575,11 +1576,13 @@ void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProje
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
-void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection, glm::vec3 const & lightDirection)
+void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings)
 {
     ShadowUniform shadowUniform;
     shadowUniform.projection = shadowProjection;
-    shadowUniform.lightDirection = lightDirection;
+    shadowUniform.ambientLight = lightSettings.ambientLight;
+    shadowUniform.lightDirection = lightSettings.sunDirection;
+    shadowUniform.lightIntensity = lightSettings.sunIntensity;
 
     wgpuQueueWriteBuffer(queue_, shadowUniformBuffer_, 0, &shadowUniform, sizeof(ShadowUniform));
 }
@@ -1707,9 +1710,9 @@ std::vector<RenderObjectPtr> Engine::loadGLTF(std::filesystem::path const & asse
     return pimpl_->loadGLTF(assetPath);
 }
 
-void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time)
+void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings)
 {
-    pimpl_->render(target, objects, camera, sceneBbox, time);
+    pimpl_->render(target, objects, camera, sceneBbox, lightSettings);
 }
 
 Box Engine::bbox(std::vector<RenderObjectPtr> const & objects) const
