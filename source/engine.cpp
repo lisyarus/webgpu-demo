@@ -135,10 +135,6 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let materialSample = textureSample(metallicRoughnessTexture, textureSampler, in.texcoord);
 
-    if (baseColorSample.a < 0.5) {
-        discard;
-    }
-
     let metallic = materialSample.b * material.metallicFactor;
     let roughness = materialSample.g * material.roughnessFactor;
 
@@ -154,7 +150,7 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let outColor = (ambientLight + (lightness + specular) * lightIntensity) * baseColor;
 
-    return vec4f(tonemap(outColor), 1.0);
+    return vec4f(tonemap(outColor), baseColorSample.a);
 }
 
 )";
@@ -425,9 +421,9 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         descriptor.primitive.cullMode = WGPUCullMode_None;
         descriptor.depthStencil = &depthStencilState;
         descriptor.multisample.nextInChain = nullptr;
-        descriptor.multisample.count = 1;
+        descriptor.multisample.count = 4;
         descriptor.multisample.mask = -1;
-        descriptor.multisample.alphaToCoverageEnabled = false;
+        descriptor.multisample.alphaToCoverageEnabled = true;
         descriptor.fragment = &fragmentState;
 
         return wgpuDeviceCreateRenderPipeline(device, &descriptor);
@@ -512,12 +508,12 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
         return wgpuDeviceCreateCommandEncoder(device, &descriptor);
     }
 
-    WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, glm::vec4 const & clearColor)
+    WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor)
     {
         WGPURenderPassColorAttachment colorAttachment;
         colorAttachment.nextInChain = nullptr;
         colorAttachment.view = colorTarget;
-        colorAttachment.resolveTarget = nullptr;
+        colorAttachment.resolveTarget = resolveTarget;
         colorAttachment.loadOp = WGPULoadOp_Clear;
         colorAttachment.storeOp = WGPUStoreOp_Store;
         colorAttachment.clearValue = {clearColor.r, clearColor.g, clearColor.b, clearColor.a};
@@ -800,6 +796,8 @@ private:
     WGPUBindGroup cameraBindGroup_;
     WGPUBindGroup modelBindGroup_;
 
+    WGPUTexture frameTexture_;
+    WGPUTextureView frameTextureView_;
     WGPUTexture depthTexture_;
     WGPUTextureView depthTextureView_;
 
@@ -808,7 +806,7 @@ private:
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
-    void resizeDepthBuffer(glm::uvec2 const & renderTargetSize);
+    void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
     void updateCameraUniformBuffer(Camera const & camera);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
@@ -828,6 +826,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , materialUniformBuffer_(createUniformBuffer(device_, sizeof(MaterialUniform)))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , modelBindGroup_(createModelBindGroup(device_, modelBindGroupLayout_, modelUniformBuffer_))
+    , frameTexture_(nullptr)
+    , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
     , depthTextureView_(nullptr)
     , defaultSampler_(createDefaultSampler(device_))
@@ -844,6 +844,8 @@ Engine::Impl::~Impl()
     wgpuSamplerRelease(defaultSampler_);
     wgpuTextureViewRelease(depthTextureView_);
     wgpuTextureRelease(depthTexture_);
+    wgpuTextureViewRelease(frameTextureView_);
+    wgpuTextureRelease(frameTexture_);
     wgpuBindGroupRelease(modelBindGroup_);
     wgpuBindGroupRelease(cameraBindGroup_);
     wgpuBufferRelease(materialUniformBuffer_);
@@ -861,16 +863,18 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     for (auto task : renderQueue_.grab())
         task();
 
-    if (!mainPipeline_)
-        mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, wgpuTextureGetFormat(target));
+    WGPUTextureFormat surfaceFormat = wgpuTextureGetFormat(target);
 
-    resizeDepthBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
+    if (!mainPipeline_)
+        mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, surfaceFormat);
+
+    updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)}, surfaceFormat);
     updateCameraUniformBuffer(camera);
 
     WGPUTextureView targetView = createTextureView(target);
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPassEncoder = createMainRenderPass(commandEncoder, targetView, depthTextureView_, {0.8f, 0.9f, 1.f, 1.f});
+    WGPURenderPassEncoder renderPassEncoder = createMainRenderPass(commandEncoder, frameTextureView_, depthTextureView_, targetView, {0.8f, 0.9f, 1.f, 1.f});
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder, mainPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 0, cameraBindGroup_, 0, nullptr);
     wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 1, modelBindGroup_, 0, nullptr);
@@ -1066,15 +1070,32 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
     return result;
 }
 
-void Engine::Impl::resizeDepthBuffer(glm::uvec2 const & renderTargetSize)
+void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat)
 {
-    if (!depthTexture_ || cachedRenderTargetSize_ != renderTargetSize)
+    if (!frameTexture_ || cachedRenderTargetSize_ != renderTargetSize)
     {
-        if (depthTexture_)
+        if (frameTexture_)
         {
+            wgpuTextureViewRelease(frameTextureView_);
+            wgpuTextureRelease(frameTexture_);
             wgpuTextureViewRelease(depthTextureView_);
             wgpuTextureRelease(depthTexture_);
         }
+
+        WGPUTextureDescriptor frameTextureDescriptor;
+        frameTextureDescriptor.nextInChain = nullptr;
+        frameTextureDescriptor.label = nullptr;
+        frameTextureDescriptor.usage = WGPUTextureUsage_RenderAttachment;
+        frameTextureDescriptor.dimension = WGPUTextureDimension_2D;
+        frameTextureDescriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
+        frameTextureDescriptor.format = surfaceFormat;
+        frameTextureDescriptor.mipLevelCount = 1;
+        frameTextureDescriptor.sampleCount = 4;
+        frameTextureDescriptor.viewFormatCount = 0;
+        frameTextureDescriptor.viewFormats = nullptr;
+
+        frameTexture_ = wgpuDeviceCreateTexture(device_, &frameTextureDescriptor);
+        frameTextureView_ = createTextureView(frameTexture_);
 
         WGPUTextureDescriptor depthTextureDescriptor;
         depthTextureDescriptor.nextInChain = nullptr;
@@ -1084,9 +1105,9 @@ void Engine::Impl::resizeDepthBuffer(glm::uvec2 const & renderTargetSize)
         depthTextureDescriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
         depthTextureDescriptor.format = WGPUTextureFormat_Depth24Plus;
         depthTextureDescriptor.mipLevelCount = 1;
-        depthTextureDescriptor.sampleCount = 1;
-        depthTextureDescriptor.viewFormatCount = 1;
-        depthTextureDescriptor.viewFormats = &depthTextureDescriptor.format;
+        depthTextureDescriptor.sampleCount = 4;
+        depthTextureDescriptor.viewFormatCount = 0;
+        depthTextureDescriptor.viewFormats = nullptr;
 
         depthTexture_ = wgpuDeviceCreateTexture(device_, &depthTextureDescriptor);
         depthTextureView_ = createTextureView(depthTexture_);
