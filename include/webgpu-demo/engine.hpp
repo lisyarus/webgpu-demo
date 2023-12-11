@@ -43,7 +43,7 @@ struct Engine
 
     Box bbox(std::vector<RenderObjectPtr> const & objects) const;
 
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera);
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time);
 
 private:
     struct Impl;

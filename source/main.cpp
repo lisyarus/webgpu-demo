@@ -31,6 +31,8 @@ int main()
     int frameId = 0;
     float time = 0.f;
 
+    bool paused = false;
+
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
     for (bool running = true; running;)
@@ -59,6 +61,8 @@ int main()
             break;
         case SDL_KEYDOWN:
             keysDown.insert(event->key.keysym.scancode);
+            if (event->key.keysym.scancode == SDL_SCANCODE_SPACE)
+                paused ^= true;
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);
@@ -74,7 +78,8 @@ int main()
 
         auto thisFrameStart = std::chrono::high_resolution_clock::now();
         float const dt = std::chrono::duration_cast<std::chrono::duration<float>>(thisFrameStart - lastFrameStart).count();
-        time += dt;
+        if (!paused)
+            time += dt;
         lastFrameStart = thisFrameStart;
 
         camera.update(dt, {
@@ -86,7 +91,7 @@ int main()
             .movingSlow     = keysDown.contains(SDL_SCANCODE_LCTRL),
         });
 
-        engine.render(surfaceTexture, renderObjects, camera);
+        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, time);
 
         application.present();
 

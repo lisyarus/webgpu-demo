@@ -53,6 +53,8 @@ namespace
     struct ShadowUniform
     {
         glm::mat4 projection;
+        glm::vec3 lightDirection;
+        float padding1[1];
     };
 
     static const char mainShader[] =
@@ -73,6 +75,7 @@ struct Material {
 
 struct Shadow {
     projection : mat4x4f,
+    lightDirection : vec3f,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -163,20 +166,21 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let roughness = materialSample.g * material.roughnessFactor;
 
     let ambientLight = vec3f(0.5);
-    let lightDirection = normalize(vec3f(1.0, 2.0, 3.0));
     let lightIntensity = vec3f(10.0, 8.0, 6.0);
 
     let viewDirection = normalize(camera.position - in.worldPosition);
-    let halfway = normalize(lightDirection + viewDirection);
+    let halfway = normalize(shadow.lightDirection + viewDirection);
 
-    let lightness = max(0.0, dot(normal, lightDirection));
+    let lightness = max(0.0, dot(normal, shadow.lightDirection));
     let specular = lightness * metallic * pow(max(0.0, dot(viewDirection, halfway)), 1.0 / max(0.0001, roughness * roughness));
 
     let shadowPositionClip = shadow.projection * vec4(in.worldPosition, 1.0);
 
     let shadowPositionNdc = shadowPositionClip.xyz / shadowPositionClip.w;
 
-    let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z);
+    let shadowBias = 0.001;
+
+    let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z - shadowBias);
 
     let outColor = (ambientLight + (lightness + specular) * shadowFactor * lightIntensity) * baseColor;
 
@@ -1057,7 +1061,7 @@ struct Engine::Impl
     Impl(WGPUDevice device, WGPUQueue queue);
     ~Impl();
 
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera);
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
 private:
@@ -1108,9 +1112,9 @@ private:
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
     void updateCameraUniformBuffer(Camera const & camera);
-    glm::mat4 computeShadowProjection();
+    glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
-    void updateShadowUniformBuffer(glm::mat4 const & shadowProjection);
+    void updateShadowUniformBuffer(glm::mat4 const & shadowProjection, glm::vec3 const & lightDirection);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
 };
@@ -1179,7 +1183,7 @@ Engine::Impl::~Impl()
     wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
 }
 
-void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera)
+void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time)
 {
     for (auto task : renderQueue_.grab())
         task();
@@ -1194,7 +1198,9 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPUTextureView targetView = createTextureView(target);
     WGPUCommandEncoder shadowCommandEncoder = createCommandEncoder(device_);
 
-    glm::mat4 shadowProjection = computeShadowProjection();
+    glm::vec3 lightDirection = glm::normalize(glm::vec3(std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)));
+
+    glm::mat4 shadowProjection = computeShadowProjection(lightDirection, sceneBbox);
 
     updateCameraUniformBufferShadow(shadowProjection);
 
@@ -1228,7 +1234,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPUCommandEncoder mainCommandEncoder = createCommandEncoder(device_);
 
     updateCameraUniformBuffer(camera);
-    updateShadowUniformBuffer(shadowProjection);
+    updateShadowUniformBuffer(shadowProjection, lightDirection);
 
     WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, {0.8f, 0.9f, 1.f, 1.f});
     wgpuRenderPassEncoderSetPipeline(mainRenderPass, mainPipeline_);
@@ -1480,14 +1486,31 @@ void Engine::Impl::updateCameraUniformBuffer(Camera const & camera)
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
-glm::mat4 Engine::Impl::computeShadowProjection()
+glm::mat4 Engine::Impl::computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox)
 {
-    glm::mat4 result = glm::mat4(0.f);
-    result[0][0] =  0.05f;
-    result[1][2] = -0.05f;
-    result[2][1] =  0.05f;
-    result[3][3] =  1.f;
-    return glToVkProjection(result);
+    glm::vec3 shadowZ = -glm::normalize(lightDirection);
+    glm::vec3 shadowX = glm::normalize(glm::cross(shadowZ, glm::vec3(1.f, 0.f, 0.f)));
+    glm::vec3 shadowY = glm::cross(shadowZ, shadowX);
+
+    glm::vec3 sceneCenter = (sceneBbox.min + sceneBbox.max) / 2.f;
+    glm::vec3 sceneHalfDiagonal = (sceneBbox.max - sceneBbox.min) / 2.f;
+
+    glm::vec3 shadowExtent{0.f};
+
+    shadowExtent[0] = std::abs(shadowX[0] * sceneHalfDiagonal[0]) + std::abs(shadowX[1] * sceneHalfDiagonal[1]) + std::abs(shadowX[2] * sceneHalfDiagonal[2]);
+    shadowExtent[1] = std::abs(shadowY[0] * sceneHalfDiagonal[0]) + std::abs(shadowY[1] * sceneHalfDiagonal[1]) + std::abs(shadowY[2] * sceneHalfDiagonal[2]);
+    shadowExtent[2] = std::abs(shadowZ[0] * sceneHalfDiagonal[0]) + std::abs(shadowZ[1] * sceneHalfDiagonal[1]) + std::abs(shadowZ[2] * sceneHalfDiagonal[2]);
+
+    shadowX *= shadowExtent[0];
+    shadowY *= shadowExtent[1];
+    shadowZ *= shadowExtent[2];
+
+    return glToVkProjection(glm::inverse(glm::mat4(
+        glm::vec4(shadowX, 0.f),
+        glm::vec4(shadowY, 0.f),
+        glm::vec4(shadowZ, 0.f),
+        glm::vec4(sceneCenter, 1.f)
+    )));
 }
 
 void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection)
@@ -1500,10 +1523,11 @@ void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProje
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
-void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection)
+void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection, glm::vec3 const & lightDirection)
 {
     ShadowUniform shadowUniform;
     shadowUniform.projection = shadowProjection;
+    shadowUniform.lightDirection = lightDirection;
 
     wgpuQueueWriteBuffer(queue_, shadowUniformBuffer_, 0, &shadowUniform, sizeof(ShadowUniform));
 }
@@ -1631,9 +1655,9 @@ std::vector<RenderObjectPtr> Engine::loadGLTF(std::filesystem::path const & asse
     return pimpl_->loadGLTF(assetPath);
 }
 
-void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera)
+void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, float time)
 {
-    pimpl_->render(target, objects, camera);
+    pimpl_->render(target, objects, camera, sceneBbox, time);
 }
 
 Box Engine::bbox(std::vector<RenderObjectPtr> const & objects) const
