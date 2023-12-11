@@ -197,7 +197,7 @@ WGPUTexture Application::nextSwapchainTexture()
     auto getTextureEnd = std::chrono::high_resolution_clock::now();
 
     // N.B.: this time will be something like 1/FPS
-    std::cout << "Waited " << (std::chrono::duration_cast<std::chrono::duration<double>>(getTextureEnd - getTextureStart).count() * 1000.0) << " ms for the swapchain image" << std::endl;
+//    std::cout << "Waited " << (std::chrono::duration_cast<std::chrono::duration<double>>(getTextureEnd - getTextureStart).count() * 1000.0) << " ms for the swapchain image" << std::endl;
 
     if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_Success)
         throw std::runtime_error("Can't get surface texture: " + std::to_string(surfaceTexture.status));

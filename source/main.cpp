@@ -35,7 +35,7 @@ int main()
 
     for (bool running = true; running;)
     {
-        std::cout << "Frame " << frameId << std::endl;
+//        std::cout << "Frame " << frameId << std::endl;
 
         bool resized = false;
 
