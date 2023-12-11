@@ -1,15 +1,14 @@
 #include <webgpu-demo/engine.hpp>
 #include <webgpu-demo/gltf_loader.hpp>
 #include <webgpu-demo/gltf_iterator.hpp>
+#include <webgpu-demo/synchronized_queue.hpp>
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 
 #include <atomic>
 #include <thread>
-#include <mutex>
-#include <deque>
-#include <condition_variable>
+#include <functional>
 
 namespace
 {
@@ -707,7 +706,6 @@ struct RenderObject
     Material material;
 
     WGPUBindGroup materialBindGroup;
-    std::atomic<bool> texturesUpdated{false};
 
     void createMaterialBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUBuffer materialUniformBuffer, WGPUSampler sampler)
     {
@@ -770,164 +768,6 @@ struct RenderObject
     }
 };
 
-namespace
-{
-
-    struct AsyncLoader
-    {
-        AsyncLoader(WGPUDevice device, WGPUQueue queue)
-            : device_(device)
-            , queue_(queue)
-        {}
-
-        struct TextureLoadTask
-        {
-            std::shared_ptr<RenderObjectCommon> common;
-            std::uint32_t textureId;
-        };
-
-        void push(TextureLoadTask const & task)
-        {
-            {
-                std::lock_guard lock{tasksMutex_};
-                tasks_.push_back(task);
-            }
-            tasksCV_.notify_one();
-        }
-
-        void stop()
-        {
-            {
-                std::lock_guard lock{tasksMutex_};
-                tasks_.clear();
-                tasks_.push_back(TextureLoadTask{nullptr, 0});
-            }
-            tasksCV_.notify_one();
-        }
-
-        void run()
-        {
-            while (true)
-            {
-                TextureLoadTask task{nullptr, 0};
-
-                {
-                    std::unique_lock lock{tasksMutex_};
-                    tasksCV_.wait(lock, [&]{ return !tasks_.empty(); });
-                    task = tasks_.front();
-                    tasks_.pop_front();
-                }
-
-                if (!task.common)
-                    break;
-
-                auto & textureInfo = *task.common->textures[task.textureId];
-
-                auto imageInfo = glTF::loadImage(textureInfo.assetPath, textureInfo.uri);
-
-                WGPUTextureDescriptor textureDescriptor;
-                textureDescriptor.nextInChain = nullptr;
-                textureDescriptor.label = nullptr;
-                textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
-                textureDescriptor.dimension = WGPUTextureDimension_2D;
-                textureDescriptor.size = {(std::uint32_t)imageInfo.width, (std::uint32_t)imageInfo.height, 1};
-
-                std::optional<WGPUTextureFormat> sRGBViewFormat;
-
-                if (imageInfo.channels == 1)
-                    textureDescriptor.format = WGPUTextureFormat_R8Unorm;
-                else if (imageInfo.channels == 2)
-                    textureDescriptor.format = WGPUTextureFormat_RG8Unorm;
-                else if (imageInfo.channels == 4)
-                {
-                    textureDescriptor.format = WGPUTextureFormat_RGBA8Unorm;
-                    sRGBViewFormat = WGPUTextureFormat_RGBA8UnormSrgb;
-                }
-
-                textureDescriptor.mipLevelCount = std::floor(std::log2(std::max(imageInfo.width, imageInfo.height))) + 1;
-                textureDescriptor.sampleCount = 1;
-                textureDescriptor.viewFormatCount = sRGBViewFormat ? 1 : 0;
-                textureDescriptor.viewFormats = sRGBViewFormat ? &(*sRGBViewFormat) : nullptr;
-
-                auto texture = wgpuDeviceCreateTexture(device_, &textureDescriptor);
-
-                std::vector<unsigned char> levelPixels;
-                int levelWidth = imageInfo.width;
-                int levelHeight = imageInfo.height;
-
-                for (int i = 0; i < textureDescriptor.mipLevelCount; ++i)
-                {
-                    if (levelPixels.empty())
-                    {
-                        levelPixels.assign(imageInfo.data.get(), imageInfo.data.get() + imageInfo.width * imageInfo.height * imageInfo.channels);
-                    }
-                    else
-                    {
-                        int newLevelWidth = levelWidth / 2;
-                        int newLevelHeight = levelHeight / 2;
-                        std::vector<unsigned char> newLevelPixels(newLevelWidth * newLevelHeight * imageInfo.channels, 0);
-
-                        for (int y = 0; y < newLevelHeight; ++y)
-                        {
-                            for (int x = 0; x < newLevelWidth; ++x)
-                            {
-                                for (int c = 0; c < imageInfo.channels; ++c)
-                                {
-                                    int sum = 0;
-                                    sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
-                                    sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
-                                    sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
-                                    sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
-                                    newLevelPixels[(y * newLevelWidth + x) * imageInfo.channels + c] = sum >> 2;
-                                }
-                            }
-                        }
-
-                        levelHeight = newLevelHeight;
-                        levelWidth = newLevelWidth;
-                        levelPixels = std::move(newLevelPixels);
-                    }
-
-                    WGPUImageCopyTexture imageCopyTexture;
-                    imageCopyTexture.nextInChain = nullptr;
-                    imageCopyTexture.texture = texture;
-                    imageCopyTexture.mipLevel = i;
-                    imageCopyTexture.origin = {0, 0, 0};
-                    imageCopyTexture.aspect = WGPUTextureAspect_All;
-
-                    WGPUTextureDataLayout textureDataLayout;
-                    textureDataLayout.nextInChain = nullptr;
-                    textureDataLayout.offset = 0;
-                    textureDataLayout.bytesPerRow = levelWidth * imageInfo.channels;
-                    textureDataLayout.rowsPerImage = levelHeight;
-
-                    WGPUExtent3D writeSize;
-                    writeSize.width = levelWidth;
-                    writeSize.height = levelHeight;
-                    writeSize.depthOrArrayLayers = 1;
-
-                    wgpuQueueWriteTexture(queue_, &imageCopyTexture, levelPixels.data(), levelPixels.size(), &textureDataLayout, &writeSize);
-                }
-
-                textureInfo.texture.store(texture);
-
-                for (auto const & user : textureInfo.users)
-                    if (auto object = user.lock())
-                        object->texturesUpdated.store(true);
-            }
-        }
-
-    private:
-        WGPUDevice device_;
-        WGPUQueue queue_;
-
-        std::mutex tasksMutex_;
-        std::deque<TextureLoadTask> tasks_;
-        std::condition_variable tasksCV_;
-    };
-
-}
-
 struct Engine::Impl
 {
     Impl(WGPUDevice device, WGPUQueue queue);
@@ -940,7 +780,10 @@ private:
     WGPUDevice device_;
     WGPUQueue queue_;
 
-    AsyncLoader loader_;
+    using Task = std::function<void()>;
+
+    SynchronizedQueue<Task> loaderQueue_;
+    SynchronizedQueue<Task> renderQueue_;
     std::thread loaderThread_;
 
     WGPUBindGroupLayout cameraBindGroupLayout_;
@@ -967,13 +810,14 @@ private:
 
     void resizeDepthBuffer(glm::uvec2 const & renderTargetSize);
     void updateCameraUniformBuffer(Camera const & camera);
+    void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
+    void loaderThreadMain();
 };
 
 Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     : device_(device)
     , queue_(queue)
-    , loader_(device_, queue_)
-    , loaderThread_([this]{ loader_.run(); })
+    , loaderThread_([this]{ loaderThreadMain(); })
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
     , modelBindGroupLayout_(createModelBindGroupLayout(device_))
     , materialBindGroupLayout_(createMaterialBindGroupLayout(device_))
@@ -992,7 +836,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
 
 Engine::Impl::~Impl()
 {
-    loader_.push({nullptr, 0});
+    loaderQueue_.grab();
+    loaderQueue_.push(nullptr);
     loaderThread_.join();
 
     wgpuTextureRelease(whiteTexture_);
@@ -1013,6 +858,9 @@ Engine::Impl::~Impl()
 
 void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera)
 {
+    for (auto task : renderQueue_.grab())
+        task();
+
     if (!mainPipeline_)
         mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, wgpuTextureGetFormat(target));
 
@@ -1031,13 +879,6 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     {
         wgpuQueueWriteBuffer(queue_, modelUniformBuffer_, 0, &object->modelMatrix, 64);
         wgpuQueueWriteBuffer(queue_, materialUniformBuffer_, 0, &object->material.uniforms, sizeof(MaterialUniform));
-
-        // TODO: need compare-exchange here
-        if (object->texturesUpdated.load())
-        {
-            object->texturesUpdated.store(false);
-            object->createMaterialBindGroup(device_, materialBindGroupLayout_, materialUniformBuffer_, defaultSampler_);
-        }
 
         wgpuRenderPassEncoderSetBindGroup(renderPassEncoder, 2, object->materialBindGroup, 0, nullptr);
 
@@ -1188,7 +1029,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 for (int i = 0; i < indexAccessor.count; ++i)
                     indices.emplace_back(*indexIterator++);
 
-                renderObject->texturesUpdated = true;
+                renderObject->createMaterialBindGroup(device_, materialBindGroupLayout_, materialUniformBuffer_, defaultSampler_);
             }
         }
 
@@ -1220,7 +1061,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
     }
 
     for (std::uint32_t i = 0; i < common->textures.size(); ++i)
-        loader_.push({common, i});
+        loaderQueue_.push([this, common, i]{ loadTexture(*common->textures[i]); });
 
     return result;
 }
@@ -1262,6 +1103,114 @@ void Engine::Impl::updateCameraUniformBuffer(Camera const & camera)
     cameraUniform.position = camera.position();
 
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
+}
+
+void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
+{
+    auto imageInfo = glTF::loadImage(textureInfo.assetPath, textureInfo.uri);
+
+    WGPUTextureDescriptor textureDescriptor;
+    textureDescriptor.nextInChain = nullptr;
+    textureDescriptor.label = nullptr;
+    textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    textureDescriptor.dimension = WGPUTextureDimension_2D;
+    textureDescriptor.size = {(std::uint32_t)imageInfo.width, (std::uint32_t)imageInfo.height, 1};
+
+    std::optional<WGPUTextureFormat> sRGBViewFormat;
+
+    if (imageInfo.channels == 1)
+        textureDescriptor.format = WGPUTextureFormat_R8Unorm;
+    else if (imageInfo.channels == 2)
+        textureDescriptor.format = WGPUTextureFormat_RG8Unorm;
+    else if (imageInfo.channels == 4)
+    {
+        textureDescriptor.format = WGPUTextureFormat_RGBA8Unorm;
+        sRGBViewFormat = WGPUTextureFormat_RGBA8UnormSrgb;
+    }
+
+    textureDescriptor.mipLevelCount = std::floor(std::log2(std::max(imageInfo.width, imageInfo.height))) + 1;
+    textureDescriptor.sampleCount = 1;
+    textureDescriptor.viewFormatCount = sRGBViewFormat ? 1 : 0;
+    textureDescriptor.viewFormats = sRGBViewFormat ? &(*sRGBViewFormat) : nullptr;
+
+    auto texture = wgpuDeviceCreateTexture(device_, &textureDescriptor);
+
+    std::vector<unsigned char> levelPixels;
+    int levelWidth = imageInfo.width;
+    int levelHeight = imageInfo.height;
+
+    for (int i = 0; i < textureDescriptor.mipLevelCount; ++i)
+    {
+        if (levelPixels.empty())
+        {
+            levelPixels.assign(imageInfo.data.get(), imageInfo.data.get() + imageInfo.width * imageInfo.height * imageInfo.channels);
+        }
+        else
+        {
+            int newLevelWidth = levelWidth / 2;
+            int newLevelHeight = levelHeight / 2;
+            std::vector<unsigned char> newLevelPixels(newLevelWidth * newLevelHeight * imageInfo.channels, 0);
+
+            for (int y = 0; y < newLevelHeight; ++y)
+            {
+                for (int x = 0; x < newLevelWidth; ++x)
+                {
+                    for (int c = 0; c < imageInfo.channels; ++c)
+                    {
+                        int sum = 0;
+                        sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
+                        sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
+                        sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
+                        sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
+                        newLevelPixels[(y * newLevelWidth + x) * imageInfo.channels + c] = sum >> 2;
+                    }
+                }
+            }
+
+            levelHeight = newLevelHeight;
+            levelWidth = newLevelWidth;
+            levelPixels = std::move(newLevelPixels);
+        }
+
+        WGPUImageCopyTexture imageCopyTexture;
+        imageCopyTexture.nextInChain = nullptr;
+        imageCopyTexture.texture = texture;
+        imageCopyTexture.mipLevel = i;
+        imageCopyTexture.origin = {0, 0, 0};
+        imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+        WGPUTextureDataLayout textureDataLayout;
+        textureDataLayout.nextInChain = nullptr;
+        textureDataLayout.offset = 0;
+        textureDataLayout.bytesPerRow = levelWidth * imageInfo.channels;
+        textureDataLayout.rowsPerImage = levelHeight;
+
+        WGPUExtent3D writeSize;
+        writeSize.width = levelWidth;
+        writeSize.height = levelHeight;
+        writeSize.depthOrArrayLayers = 1;
+
+        wgpuQueueWriteTexture(queue_, &imageCopyTexture, levelPixels.data(), levelPixels.size(), &textureDataLayout, &writeSize);
+    }
+
+    textureInfo.texture.store(texture);
+
+    for (auto const & user : textureInfo.users)
+        renderQueue_.push([this, user]{
+            if (auto object = user.lock())
+                object->createMaterialBindGroup(device_, materialBindGroupLayout_, materialUniformBuffer_, defaultSampler_);
+        });
+}
+
+void Engine::Impl::loaderThreadMain()
+{
+    while (true)
+    {
+        auto task = loaderQueue_.pop();
+        if (!task)
+            break;
+        task();
+    }
 }
 
 Engine::Engine(WGPUDevice device, WGPUQueue queue)
