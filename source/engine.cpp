@@ -1172,25 +1172,27 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
             levelPixels = std::move(newLevelPixels);
         }
 
-        WGPUImageCopyTexture imageCopyTexture;
-        imageCopyTexture.nextInChain = nullptr;
-        imageCopyTexture.texture = texture;
-        imageCopyTexture.mipLevel = i;
-        imageCopyTexture.origin = {0, 0, 0};
-        imageCopyTexture.aspect = WGPUTextureAspect_All;
+        renderQueue_.push([=, this, channels = imageInfo.channels]{
+            WGPUImageCopyTexture imageCopyTexture;
+            imageCopyTexture.nextInChain = nullptr;
+            imageCopyTexture.texture = texture;
+            imageCopyTexture.mipLevel = i;
+            imageCopyTexture.origin = {0, 0, 0};
+            imageCopyTexture.aspect = WGPUTextureAspect_All;
 
-        WGPUTextureDataLayout textureDataLayout;
-        textureDataLayout.nextInChain = nullptr;
-        textureDataLayout.offset = 0;
-        textureDataLayout.bytesPerRow = levelWidth * imageInfo.channels;
-        textureDataLayout.rowsPerImage = levelHeight;
+            WGPUTextureDataLayout textureDataLayout;
+            textureDataLayout.nextInChain = nullptr;
+            textureDataLayout.offset = 0;
+            textureDataLayout.bytesPerRow = levelWidth * channels;
+            textureDataLayout.rowsPerImage = levelHeight;
 
-        WGPUExtent3D writeSize;
-        writeSize.width = levelWidth;
-        writeSize.height = levelHeight;
-        writeSize.depthOrArrayLayers = 1;
+            WGPUExtent3D writeSize;
+            writeSize.width = levelWidth;
+            writeSize.height = levelHeight;
+            writeSize.depthOrArrayLayers = 1;
 
-        wgpuQueueWriteTexture(queue_, &imageCopyTexture, levelPixels.data(), levelPixels.size(), &textureDataLayout, &writeSize);
+            wgpuQueueWriteTexture(queue_, &imageCopyTexture, levelPixels.data(), levelPixels.size(), &textureDataLayout, &writeSize);
+        });
     }
 
     textureInfo.texture.store(texture);
