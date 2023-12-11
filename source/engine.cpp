@@ -1193,6 +1193,8 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
             levelPixels = std::move(newLevelPixels);
         }
 
+        // This should be possible to do in the loader thread once
+        // wgpu-0.19 releases, see https://github.com/gfx-rs/wgpu/issues/4859
         renderQueue_.push([=, this, channels = imageInfo.channels]{
             WGPUImageCopyTexture imageCopyTexture;
             imageCopyTexture.nextInChain = nullptr;
