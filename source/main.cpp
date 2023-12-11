@@ -19,7 +19,8 @@ int main()
     auto sceneBbox = engine.bbox(renderObjects);
 
     Camera camera;
-    camera.move((sceneBbox.first + sceneBbox.second) / 2.f);
+    camera.move({-11.f, 1.5f, -0.25f});
+    camera.setRotation(glm::radians(90.f), 0.f);
     camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
     float sceneDiagonal = glm::distance(sceneBbox.first, sceneBbox.second);
     camera.setClip(sceneDiagonal / 1000.f, sceneDiagonal);

@@ -7,6 +7,14 @@ void Camera::move(glm::vec3 const & position)
     position_ = position;
 }
 
+void Camera::setRotation(float angleX, float angleY)
+{
+    xAngleTarget_ = angleX;
+    xAngle_ = angleX;
+    yAngleTarget_ = angleY;
+    yAngle_ = angleY;
+}
+
 void Camera::setFov(float fovY, float aspectRatio)
 {
     fovY_ = fovY;
