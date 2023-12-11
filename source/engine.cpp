@@ -268,7 +268,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
         entries[0].visibility = WGPUShaderStage_Vertex;
         entries[0].buffer.nextInChain = nullptr;
         entries[0].buffer.type = WGPUBufferBindingType_Uniform;
-        entries[0].buffer.hasDynamicOffset = false;
+        entries[0].buffer.hasDynamicOffset = true;
         entries[0].buffer.minBindingSize = 64;
         entries[0].sampler.nextInChain = nullptr;
         entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
@@ -299,7 +299,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
         entries[0].visibility = WGPUShaderStage_Fragment;
         entries[0].buffer.nextInChain = nullptr;
         entries[0].buffer.type = WGPUBufferBindingType_Uniform;
-        entries[0].buffer.hasDynamicOffset = false;
+        entries[0].buffer.hasDynamicOffset = true;
         entries[0].buffer.minBindingSize = sizeof(MaterialUniform);
         entries[0].sampler.nextInChain = nullptr;
         entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
@@ -529,7 +529,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
 
         WGPURenderPipelineDescriptor descriptor;
         descriptor.nextInChain = nullptr;
-        descriptor.label = nullptr;
+        descriptor.label = "main";
         descriptor.layout = pipelineLayout;
         descriptor.nextInChain = nullptr;
         descriptor.vertex.module = shaderModule;
@@ -599,7 +599,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
 
         WGPURenderPipelineDescriptor descriptor;
         descriptor.nextInChain = nullptr;
-        descriptor.label = nullptr;
+        descriptor.label = "shadow";
         descriptor.layout = pipelineLayout;
         descriptor.nextInChain = nullptr;
         descriptor.vertex.module = shaderModule;
@@ -993,10 +993,19 @@ struct RenderObject
 
     Material material;
 
-    WGPUBindGroup materialBindGroup;
+    WGPUBindGroup materialBindGroup = nullptr;
 
     void createMaterialBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUBuffer materialUniformBuffer, WGPUSampler sampler)
     {
+        if (materialBindGroup)
+        {
+            wgpuBindGroupRelease(materialBindGroup);
+            materialBindGroup = nullptr;
+        }
+
+        if (!materialUniformBuffer)
+            return;
+
         WGPUBindGroupEntry materialBindGroupEntries[5];
 
         materialBindGroupEntries[0].nextInChain = nullptr;
@@ -1137,11 +1146,11 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, modelBindGroupLayout_, materialBindGroupLayout_}))
     , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
-    , modelUniformBuffer_(createUniformBuffer(device_, sizeof(glm::mat4)))
-    , materialUniformBuffer_(createUniformBuffer(device_, sizeof(MaterialUniform)))
+    , modelUniformBuffer_(nullptr)
+    , materialUniformBuffer_(nullptr)
     , shadowUniformBuffer_(createUniformBuffer(device_, sizeof(ShadowUniform)))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
-    , modelBindGroup_(createModelBindGroup(device_, modelBindGroupLayout_, modelUniformBuffer_))
+    , modelBindGroup_(nullptr)
     , shadowBindGroup_(createShadowBindGroup(device_, shadowBindGroupLayout_, shadowUniformBuffer_, shadowSampler_, shadowMapView_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
@@ -1195,6 +1204,52 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)}, surfaceFormat);
 
+    constexpr std::uint64_t minUniformBufferOffsetAlignment = 256;
+    if (!modelUniformBuffer_ || wgpuBufferGetSize(modelUniformBuffer_) < objects.size() * minUniformBufferOffsetAlignment)
+    {
+        if (modelUniformBuffer_)
+        {
+            wgpuBindGroupRelease(modelBindGroup_);
+            wgpuBufferRelease(modelUniformBuffer_);
+            wgpuBufferRelease(materialUniformBuffer_);
+        }
+
+        modelUniformBuffer_ = createUniformBuffer(device_, objects.size() * minUniformBufferOffsetAlignment);
+        materialUniformBuffer_ = createUniformBuffer(device_, objects.size() * minUniformBufferOffsetAlignment);
+
+        modelBindGroup_ = createModelBindGroup(device_, modelBindGroupLayout_, modelUniformBuffer_);
+
+        for (auto const & object : objects)
+        {
+            object->createMaterialBindGroup(device_, materialBindGroupLayout_, materialUniformBuffer_, defaultSampler_);
+        }
+    }
+
+    {
+        struct ModelUniformWrapper
+        {
+            glm::mat4 modelMatrix;
+            char padding[minUniformBufferOffsetAlignment - sizeof(glm::mat4)];
+        };
+
+        struct MaterialUniformWrapper
+        {
+            MaterialUniform uniform;
+            char padding[minUniformBufferOffsetAlignment - sizeof(MaterialUniform)];
+        };
+
+        std::vector<ModelUniformWrapper> models(objects.size());
+        std::vector<MaterialUniformWrapper> materials(objects.size());
+        for (int i = 0; i < objects.size(); ++i)
+        {
+            materials[i].uniform = objects[i]->material.uniforms;
+            models[i].modelMatrix = objects[i]->modelMatrix;
+        }
+
+        wgpuQueueWriteBuffer(queue_, modelUniformBuffer_, 0, models.data(), models.size() * sizeof(models[0]));
+        wgpuQueueWriteBuffer(queue_, materialUniformBuffer_, 0, materials.data(), materials.size() * sizeof(materials[0]));
+    }
+
     WGPUTextureView targetView = createTextureView(target);
     WGPUCommandEncoder shadowCommandEncoder = createCommandEncoder(device_);
 
@@ -1208,18 +1263,15 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     wgpuRenderPassEncoderSetPipeline(shadowRenderPass, shadowPipeline_);
     wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 0, cameraBindGroup_, 0, nullptr);
-    wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 1, modelBindGroup_, 0, nullptr);
 
-    for (auto const & object : objects)
+    for (int i = 0; i < objects.size(); ++i)
     {
-        // THIS IS WRONG: when the render pass is submitted to the queue, only the last
-        // object's model & material uniforms are used
-        // TODO: write them beforehand into a separate buffer, use dynamic offsets to
-        // select a particular object's data
-        wgpuQueueWriteBuffer(queue_, modelUniformBuffer_, 0, &object->modelMatrix, 64);
-        wgpuQueueWriteBuffer(queue_, materialUniformBuffer_, 0, &object->material.uniforms, sizeof(MaterialUniform));
+        auto const & object = objects[i];
 
-        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 2, object->materialBindGroup, 0, nullptr);
+        std::uint32_t dynamicOffset = i * minUniformBufferOffsetAlignment;
+
+        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 1, modelBindGroup_, 1, &dynamicOffset);
+        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 2, object->materialBindGroup, 1, &dynamicOffset);
 
         wgpuRenderPassEncoderSetVertexBuffer(shadowRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
         wgpuRenderPassEncoderSetIndexBuffer(shadowRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
@@ -1239,16 +1291,16 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, {0.8f, 0.9f, 1.f, 1.f});
     wgpuRenderPassEncoderSetPipeline(mainRenderPass, mainPipeline_);
     wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 0, cameraBindGroup_, 0, nullptr);
-    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 1, modelBindGroup_, 0, nullptr);
     wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 3, shadowBindGroup_, 0, nullptr);
 
-    for (auto const & object : objects)
+    for (int i = 0; i < objects.size(); ++i)
     {
-        // THIS IS WRONG: see above
-        wgpuQueueWriteBuffer(queue_, modelUniformBuffer_, 0, &object->modelMatrix, 64);
-        wgpuQueueWriteBuffer(queue_, materialUniformBuffer_, 0, &object->material.uniforms, sizeof(MaterialUniform));
+        auto const & object = objects[i];
 
-        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 2, object->materialBindGroup, 0, nullptr);
+        std::uint32_t dynamicOffset = i * minUniformBufferOffsetAlignment;
+
+        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 1, modelBindGroup_, 1, &dynamicOffset);
+        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 2, object->materialBindGroup, 1, &dynamicOffset);
 
         wgpuRenderPassEncoderSetVertexBuffer(mainRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
         wgpuRenderPassEncoderSetIndexBuffer(mainRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
