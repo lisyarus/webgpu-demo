@@ -32,6 +32,8 @@ Then, follow the usual steps for building something with CMake:
 
 Note that in case of MacOS, linking dynamic wgpu-native library (`libwgpu_native.dylib`) doesn't fully work right now due to a [bug](https://github.com/gfx-rs/wgpu-native/issues/329). The static version (`libwgpu_native.a`) works, though, so you can simply delete the dynamic library so that CMake uses the static one instead.
 
+**Update**: this issue is fixed in the [v0.18.1.4](https://github.com/gfx-rs/wgpu-native/releases/tag/v0.18.1.4) release.
+
 # SDL2-wgpu
 
 The [`include/webgpu-demo/sdl2_wgpu.h`](https://github.com/lisyarus/webgpu-demo/blob/main/include/webgpu-demo/sdl_wgpu.h) and [`source/sdl2_wgpu.c`](https://github.com/lisyarus/webgpu-demo/blob/main/source/sdl_wgpu.c) files implement a function `WGPUSurface SDL_WGPU_CreateSurface(WGPUInstance, SDL_Window *)` which creates a WebGPU surface from an SDL2 window, and should work on Linux (X11 and Wayland), Windows and MacOS. It is mostly based on [glfw3webgpu](https://github.com/eliemichel/glfw3webgpu/blob/main/glfw3webgpu.c).
