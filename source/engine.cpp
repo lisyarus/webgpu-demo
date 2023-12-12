@@ -295,7 +295,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
         return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
     }
 
-    WGPUBindGroupLayout createMaterialBindGroupLayout(WGPUDevice device)
+    WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device)
     {
         WGPUBindGroupLayoutEntry entries[4];
 
@@ -971,73 +971,73 @@ struct RenderObject
 
     Box bbox;
 
-    struct Material
+    struct Textures
     {
         std::optional<std::uint32_t> baseColorTextureId;
         std::optional<std::uint32_t> metallicRoughnessTextureId;
         std::optional<std::uint32_t> normalTextureId;
     };
 
-    Material material;
+    Textures textures;
 
-    WGPUBindGroup materialBindGroup = nullptr;
+    WGPUBindGroup texturesBindGroup = nullptr;
 
-    void createMaterialBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUSampler sampler)
+    void createTexturesBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUSampler sampler)
     {
-        if (materialBindGroup)
+        if (texturesBindGroup)
         {
-            wgpuBindGroupRelease(materialBindGroup);
-            materialBindGroup = nullptr;
+            wgpuBindGroupRelease(texturesBindGroup);
+            texturesBindGroup = nullptr;
         }
 
-        WGPUBindGroupEntry materialBindGroupEntries[4];
+        WGPUBindGroupEntry entries[4];
 
-        materialBindGroupEntries[0].nextInChain = nullptr;
-        materialBindGroupEntries[0].binding = 0;
-        materialBindGroupEntries[0].buffer = nullptr;
-        materialBindGroupEntries[0].offset = 0;
-        materialBindGroupEntries[0].size = 0;
-        materialBindGroupEntries[0].sampler = sampler;
-        materialBindGroupEntries[0].textureView = nullptr;
+        entries[0].nextInChain = nullptr;
+        entries[0].binding = 0;
+        entries[0].buffer = nullptr;
+        entries[0].offset = 0;
+        entries[0].size = 0;
+        entries[0].sampler = sampler;
+        entries[0].textureView = nullptr;
 
-        materialBindGroupEntries[1].nextInChain = nullptr;
-        materialBindGroupEntries[1].binding = 1;
-        materialBindGroupEntries[1].buffer = nullptr;
-        materialBindGroupEntries[1].offset = 0;
-        materialBindGroupEntries[1].size = 0;
-        materialBindGroupEntries[1].sampler = nullptr;
-        materialBindGroupEntries[1].textureView = common->createTextureView(material.baseColorTextureId, true);
+        entries[1].nextInChain = nullptr;
+        entries[1].binding = 1;
+        entries[1].buffer = nullptr;
+        entries[1].offset = 0;
+        entries[1].size = 0;
+        entries[1].sampler = nullptr;
+        entries[1].textureView = common->createTextureView(textures.baseColorTextureId, true);
 
-        materialBindGroupEntries[2].nextInChain = nullptr;
-        materialBindGroupEntries[2].binding = 2;
-        materialBindGroupEntries[2].buffer = nullptr;
-        materialBindGroupEntries[2].offset = 0;
-        materialBindGroupEntries[2].size = 0;
-        materialBindGroupEntries[2].sampler = nullptr;
-        materialBindGroupEntries[2].textureView = common->createTextureView(material.normalTextureId, false);
+        entries[2].nextInChain = nullptr;
+        entries[2].binding = 2;
+        entries[2].buffer = nullptr;
+        entries[2].offset = 0;
+        entries[2].size = 0;
+        entries[2].sampler = nullptr;
+        entries[2].textureView = common->createTextureView(textures.normalTextureId, false);
 
-        materialBindGroupEntries[3].nextInChain = nullptr;
-        materialBindGroupEntries[3].binding = 3;
-        materialBindGroupEntries[3].buffer = nullptr;
-        materialBindGroupEntries[3].offset = 0;
-        materialBindGroupEntries[3].size = 0;
-        materialBindGroupEntries[3].sampler = nullptr;
-        materialBindGroupEntries[3].textureView = common->createTextureView(material.metallicRoughnessTextureId, false);
+        entries[3].nextInChain = nullptr;
+        entries[3].binding = 3;
+        entries[3].buffer = nullptr;
+        entries[3].offset = 0;
+        entries[3].size = 0;
+        entries[3].sampler = nullptr;
+        entries[3].textureView = common->createTextureView(textures.metallicRoughnessTextureId, false);
 
-        WGPUBindGroupDescriptor materialBindGroupDescriptor;
-        materialBindGroupDescriptor.nextInChain = nullptr;
-        materialBindGroupDescriptor.label = nullptr;
-        materialBindGroupDescriptor.layout = layout;
-        materialBindGroupDescriptor.entryCount = 4;
-        materialBindGroupDescriptor.entries = materialBindGroupEntries;
+        WGPUBindGroupDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.layout = layout;
+        descriptor.entryCount = 4;
+        descriptor.entries = entries;
 
-        materialBindGroup = wgpuDeviceCreateBindGroup(device, &materialBindGroupDescriptor);
+        texturesBindGroup = wgpuDeviceCreateBindGroup(device, &descriptor);
     }
 
     ~RenderObject()
     {
-        if (materialBindGroup)
-            wgpuBindGroupRelease(materialBindGroup);
+        if (texturesBindGroup)
+            wgpuBindGroupRelease(texturesBindGroup);
     }
 };
 
@@ -1061,7 +1061,7 @@ private:
 
     WGPUBindGroupLayout cameraBindGroupLayout_;
     WGPUBindGroupLayout objectBindGroupLayout_;
-    WGPUBindGroupLayout materialBindGroupLayout_;
+    WGPUBindGroupLayout texturesBindGroupLayout_;
     WGPUBindGroupLayout shadowBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
@@ -1109,16 +1109,16 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , loaderThread_([this]{ loaderThreadMain(); })
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
     , objectBindGroupLayout_(createObjectBindGroupLayout(device_))
-    , materialBindGroupLayout_(createMaterialBindGroupLayout(device_))
+    , texturesBindGroupLayout_(createTexturesBindGroupLayout(device_))
     , shadowBindGroupLayout_(createShadowBindGroupLayout(device_))
     , shaderModule_(createShaderModule(device_, mainShader))
     , shadowMap_(createShadowMapTexture(device_, 4096))
     , shadowMapView_(createTextureView(shadowMap_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
-    , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, materialBindGroupLayout_, shadowBindGroupLayout_}))
+    , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, shadowBindGroupLayout_}))
     , mainPipeline_(nullptr)
-    , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, materialBindGroupLayout_}))
+    , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
     , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
@@ -1160,7 +1160,7 @@ Engine::Impl::~Impl()
     wgpuTextureRelease(shadowMap_);
     wgpuShaderModuleRelease(shaderModule_);
     wgpuBindGroupLayoutRelease(shadowBindGroupLayout_);
-    wgpuBindGroupLayoutRelease(materialBindGroupLayout_);
+    wgpuBindGroupLayoutRelease(texturesBindGroupLayout_);
     wgpuBindGroupLayoutRelease(objectBindGroupLayout_);
     wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
 }
@@ -1191,7 +1191,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
         objectBindGroup_ = createObjectBindGroup(device_, objectBindGroupLayout_, objectUniformBuffer_);
 
         for (auto const & object : objects)
-            object->createMaterialBindGroup(device_, materialBindGroupLayout_, defaultSampler_);
+            object->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
     }
 
     {
@@ -1229,7 +1229,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
         std::uint32_t dynamicOffset = i * minUniformBufferOffsetAlignment;
 
         wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 1, objectBindGroup_, 1, &dynamicOffset);
-        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 2, object->materialBindGroup, 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 2, object->texturesBindGroup, 0, nullptr);
 
         wgpuRenderPassEncoderSetVertexBuffer(shadowRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
         wgpuRenderPassEncoderSetIndexBuffer(shadowRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
@@ -1258,7 +1258,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
         std::uint32_t dynamicOffset = i * minUniformBufferOffsetAlignment;
 
         wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 1, objectBindGroup_, 1, &dynamicOffset);
-        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 2, object->materialBindGroup, 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 2, object->texturesBindGroup, 0, nullptr);
 
         wgpuRenderPassEncoderSetVertexBuffer(mainRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
         wgpuRenderPassEncoderSetIndexBuffer(mainRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
@@ -1363,9 +1363,9 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 renderObject->uniforms.roughnessFactor = materialIn.roughnessFactor;
                 renderObject->uniforms.emissiveFactor = materialIn.emissiveFactor;
 
-                renderObject->material.baseColorTextureId = materialIn.baseColorTexture;
-                renderObject->material.metallicRoughnessTextureId = materialIn.metallicRoughnessTexture;
-                renderObject->material.normalTextureId = materialIn.normalTexture;
+                renderObject->textures.baseColorTextureId = materialIn.baseColorTexture;
+                renderObject->textures.metallicRoughnessTextureId = materialIn.metallicRoughnessTexture;
+                renderObject->textures.normalTextureId = materialIn.normalTexture;
 
                 if (materialIn.baseColorTexture)
                     common->textures[*materialIn.baseColorTexture]->users.push_back(renderObject);
@@ -1403,7 +1403,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 for (int i = 0; i < indexAccessor.count; ++i)
                     indices.emplace_back(*indexIterator++);
 
-                renderObject->createMaterialBindGroup(device_, materialBindGroupLayout_, defaultSampler_);
+                renderObject->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
             }
         }
 
@@ -1641,7 +1641,7 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
     for (auto const & user : textureInfo.users)
         renderQueue_.push([this, user]{
             if (auto object = user.lock())
-                object->createMaterialBindGroup(device_, materialBindGroupLayout_, defaultSampler_);
+                object->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
         });
 }
 
