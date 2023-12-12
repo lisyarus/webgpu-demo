@@ -124,6 +124,19 @@ fn sampleEnvMap(dir : vec3f) -> vec3f {
     return textureSample(envMapTexture, envSampler, envDirectionToTexcoord(dir)).rgb * lights.envIntensity;
 }
 
+fn specularD(halfway : vec3f, normal : vec3f, alpha2 : f32) -> f32 {
+    let ndoth = dot(halfway, normal);
+    let denom = (ndoth * ndoth * (alpha2 - 1.0) + 1.0);
+    return alpha2 * step(0.0, ndoth) / PI / denom / denom;
+}
+
+fn specularVHelper(halfway : vec3f, normal : vec3f, alpha2 : f32, v : vec3f) -> f32 {
+    let hdotv = dot(halfway, v);
+    let ndotv = dot(normal, v);
+
+    return step(0.0, hdotv) / (abs(ndotv) + sqrt(mix(ndotv * ndotv, 1.0, alpha2)));
+}
+
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
@@ -146,18 +159,28 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let halfway = normalize(lights.sunDirection + viewDirection);
     let reflected = reflect(-viewDirection, normal);
 
+    let fresnelFactor = pow(1.0 - abs(dot(viewDirection, halfway)), 5.0);
+    let alpha = roughness * roughness;
+    let alpha2 = alpha * alpha;
+
+    // The BRDF is implemented as described in glTF 2.0 specification:
+    // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
+    let diffuse = (1.0 / PI) * baseColor;
+    let specular = specularVHelper(halfway, normal, alpha2, lights.sunDirection)
+        * specularVHelper(halfway, normal, alpha2, viewDirection)
+        * specularD(halfway, normal, alpha2);
+    let dielectric = mix(diffuse, vec3f(specular), mix(fresnelFactor, 1.0, 0.04));
+    let metal = specular * mix(vec3f(fresnelFactor), vec3f(1.0), baseColor);
+    let material = mix(dielectric, metal, metallic);
+
     let lightness = max(0.0, dot(normal, lights.sunDirection));
-    let specular = lightness * metallic * pow(max(0.0, dot(viewDirection, halfway)), 1.0 / max(0.0001, roughness * roughness));
 
     let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
-
     let shadowPositionNdc = perspectiveDivide(shadowPositionClip);
-
     let shadowBias = 0.001;
-
     let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z - shadowBias);
 
-    let outColor = (lights.ambientLight + (lightness + specular) * shadowFactor * lights.sunIntensity) * baseColor;
+    let outColor = lights.ambientLight * baseColor + material * lightness * shadowFactor * lights.sunIntensity;
 
     return vec4f(tonemap(outColor), baseColorSample.a);
 }

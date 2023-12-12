@@ -9,7 +9,6 @@
 #include <chrono>
 #include <unordered_set>
 
-
 int main()
 {
     Application application;
@@ -73,7 +72,6 @@ int main()
                 if (day)
                     engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
                 else
-//                    engine.setEnvMap(PROJECT_ROOT "/dikhololo_night_4k.hdr");
                     engine.setEnvMap(PROJECT_ROOT "/satara_night_4k.hdr");
             }
             if (event->key.keysym.scancode == SDL_SCANCODE_V)
@@ -119,7 +117,7 @@ int main()
                 .ambientLight = {0.5f, 0.4f, 0.3f},
                 .envIntensity = 0.5f,
                 .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
-                .sunIntensity = {10.f, 8.f, 6.f},
+                .sunIntensity = {20.f, 16.f, 12.f},
             };
         }
         else
