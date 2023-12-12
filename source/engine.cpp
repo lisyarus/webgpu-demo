@@ -621,6 +621,7 @@ void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection,
     LightsUniform lightsUniform;
     lightsUniform.shadowProjection = shadowProjection;
     lightsUniform.ambientLight = lightSettings.ambientLight;
+    lightsUniform.envIntensity = lightSettings.envIntensity;
     lightsUniform.sunDirection = lightSettings.sunDirection;
     lightsUniform.sunIntensity = lightSettings.sunIntensity;
 

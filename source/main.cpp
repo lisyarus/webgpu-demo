@@ -67,7 +67,15 @@ int main()
             if (event->key.keysym.scancode == SDL_SCANCODE_SPACE)
                 paused ^= true;
             if (event->key.keysym.scancode == SDL_SCANCODE_N)
+            {
                 day ^= true;
+
+                if (day)
+                    engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
+                else
+//                    engine.setEnvMap(PROJECT_ROOT "/dikhololo_night_4k.hdr");
+                    engine.setEnvMap(PROJECT_ROOT "/satara_night_4k.hdr");
+            }
             if (event->key.keysym.scancode == SDL_SCANCODE_V)
             {
                 vsync ^= true;
@@ -109,6 +117,7 @@ int main()
             {
                 .skyColor = {0.4f, 0.7f, 1.f},
                 .ambientLight = {0.5f, 0.4f, 0.3f},
+                .envIntensity = 0.5f,
                 .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
                 .sunIntensity = {10.f, 8.f, 6.f},
             };
@@ -119,6 +128,7 @@ int main()
             {
                 .skyColor = {0.0f, 0.0f, 0.001f},
                 .ambientLight = {0.05f, 0.1f, 0.15f},
+                .envIntensity = 0.05f,
                 .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
                 .sunIntensity = {1.f, 2.f, 3.f},
             };

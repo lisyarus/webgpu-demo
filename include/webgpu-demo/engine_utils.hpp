@@ -41,7 +41,7 @@ struct LightsUniform
     glm::vec3 sunDirection;
     float padding2[1];
     glm::vec3 sunIntensity;
-    float padding3[1];
+    float envIntensity;
 };
 
 glm::mat4 glToVkProjection(glm::mat4 matrix);

@@ -35,6 +35,7 @@ struct Lights {
     ambientLight : vec3f,
     sunDirection : vec3f,
     sunIntensity : vec3f,
+    envIntensity : f32,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -119,6 +120,10 @@ fn envDirectionToTexcoord(dir : vec3f) -> vec2f {
     return vec2f(x, y);
 }
 
+fn sampleEnvMap(dir : vec3f) -> vec3f {
+    return textureSample(envMapTexture, envSampler, envDirectionToTexcoord(dir)).rgb * lights.envIntensity;
+}
+
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
@@ -139,6 +144,7 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let viewDirection = normalize(camera.position - in.worldPosition);
     let halfway = normalize(lights.sunDirection + viewDirection);
+    let reflected = reflect(-viewDirection, normal);
 
     let lightness = max(0.0, dot(normal, lights.sunDirection));
     let specular = lightness * metallic * pow(max(0.0, dot(viewDirection, halfway)), 1.0 / max(0.0001, roughness * roughness));
@@ -209,9 +215,10 @@ fn envFragmentMain(in : EnvVertexOutput) -> @location(0) vec4f {
     let p0 = perspectiveDivide(camera.viewProjectionInverse * vec4f(in.vertex, 0.0, 1.0));
     let p1 = perspectiveDivide(camera.viewProjectionInverse * vec4f(in.vertex, 1.0, 1.0));
     let direction = normalize(p1 - p0);
-    let envMapSample = textureSample(envMapTexture, envSampler, envDirectionToTexcoord(direction)).rgb;
 
-    return vec4f(tonemap(envMapSample), 1.0);
+    let sunCircle = smoothstep(0.9999, 0.99999, dot(direction, lights.sunDirection)) * lights.sunIntensity;
+
+    return vec4f(tonemap(sampleEnvMap(direction) + sunCircle), 1.0);
 }
 
 )";

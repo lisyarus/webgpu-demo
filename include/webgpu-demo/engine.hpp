@@ -30,6 +30,7 @@ struct Engine
     {
         glm::vec3 skyColor;
         glm::vec3 ambientLight;
+        float envIntensity;
         glm::vec3 sunDirection;
         glm::vec3 sunIntensity;
     };
