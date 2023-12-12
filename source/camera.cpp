@@ -36,6 +36,9 @@ void Camera::rotate(float deltaX, float deltaY)
 {
     xAngleTarget_ += deltaX * sensitivity_;
     yAngleTarget_ += deltaY * sensitivity_;
+
+    yAngleTarget_ = std::max(yAngleTarget_, -glm::pi<float>() / 2.f);
+    yAngleTarget_ = std::min(yAngleTarget_,  glm::pi<float>() / 2.f);
 }
 
 void Camera::update(float dt, UpdateData const & updateData)
