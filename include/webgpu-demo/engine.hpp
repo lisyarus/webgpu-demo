@@ -22,6 +22,8 @@ struct Engine
 
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
+    void setEnvMap(std::filesystem::path const & hdrImagePath);
+
     Box bbox(std::vector<RenderObjectPtr> const & objects) const;
 
     struct LightSettings

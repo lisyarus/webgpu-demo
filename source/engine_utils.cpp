@@ -49,6 +49,8 @@ struct Lights {
 @group(3) @binding(0) var<uniform> lights : Lights;
 @group(3) @binding(1) var shadowSampler: sampler_comparison;
 @group(3) @binding(2) var shadowMapTexture: texture_depth_2d;
+@group(3) @binding(3) var envSampler: sampler;
+@group(3) @binding(4) var envMapTexture : texture_2d<f32>;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -105,6 +107,18 @@ fn tonemap(x : vec3f) -> vec3f {
 //    return ACESFilm(x);
 }
 
+fn perspectiveDivide(p : vec4f) -> vec3f {
+    return p.xyz / p.w;
+}
+
+const PI = 3.141592653589793;
+
+fn envDirectionToTexcoord(dir : vec3f) -> vec2f {
+    let x = atan2(dir.z, dir.x) / PI * 0.5 + 0.5;
+    let y = acos(dir.y) / PI;
+    return vec2f(x, y);
+}
+
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
@@ -131,7 +145,7 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
 
-    let shadowPositionNdc = shadowPositionClip.xyz / shadowPositionClip.w;
+    let shadowPositionNdc = perspectiveDivide(shadowPositionClip);
 
     let shadowBias = 0.001;
 
@@ -167,6 +181,39 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
     }
 }
 
+struct EnvVertexInput {
+    @builtin(vertex_index) index : u32,
+}
+
+struct EnvVertexOutput {
+    @builtin(position) position : vec4f,
+    @location(0) vertex : vec2f,
+}
+
+@vertex
+fn envVertexMain(in : EnvVertexInput) -> EnvVertexOutput {
+    var vertex : vec2f;
+    if (in.index == 0u) {
+        vertex = vec2f(-1.0, -1.0);
+    } else if (in.index == 1u) {
+        vertex = vec2f( 3.0, -1.0);
+    } else {
+        vertex = vec2f(-1.0,  3.0);
+    }
+
+    return EnvVertexOutput(vec4f(vertex, 0.0, 1.0), vertex);
+}
+
+@fragment
+fn envFragmentMain(in : EnvVertexOutput) -> @location(0) vec4f {
+    let p0 = perspectiveDivide(camera.viewProjectionInverse * vec4f(in.vertex, 0.0, 1.0));
+    let p1 = perspectiveDivide(camera.viewProjectionInverse * vec4f(in.vertex, 1.0, 1.0));
+    let direction = normalize(p1 - p0);
+    let envMapSample = textureSample(envMapTexture, envSampler, envDirectionToTexcoord(direction)).rgb;
+
+    return vec4f(tonemap(envMapSample), 1.0);
+}
+
 )";
 
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
@@ -183,6 +230,17 @@ WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
     shaderModuleDescriptor.hints = nullptr;
 
     return wgpuDeviceCreateShaderModule(device, &shaderModuleDescriptor);
+}
+
+WGPUBindGroupLayout createEmptyBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 0;
+    descriptor.entries = nullptr;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
 WGPUBindGroupLayout createCameraBindGroupLayout(WGPUDevice device)
@@ -333,7 +391,7 @@ WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device)
 
 WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
 {
-    WGPUBindGroupLayoutEntry entries[3];
+    WGPUBindGroupLayoutEntry entries[5];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -389,10 +447,46 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[2].storageTexture.format = WGPUTextureFormat_Undefined;
     entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
+    entries[3].nextInChain = nullptr;
+    entries[3].binding = 3;
+    entries[3].visibility = WGPUShaderStage_Fragment;
+    entries[3].buffer.nextInChain = nullptr;
+    entries[3].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[3].buffer.hasDynamicOffset = false;
+    entries[3].buffer.minBindingSize = 0;
+    entries[3].sampler.nextInChain = nullptr;
+    entries[3].sampler.type = WGPUSamplerBindingType_NonFiltering;
+    entries[3].texture.nextInChain = nullptr;
+    entries[3].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[3].texture.multisampled = false;
+    entries[3].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[3].storageTexture.nextInChain = nullptr;
+    entries[3].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[3].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[3].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[4].nextInChain = nullptr;
+    entries[4].binding = 4;
+    entries[4].visibility = WGPUShaderStage_Fragment;
+    entries[4].buffer.nextInChain = nullptr;
+    entries[4].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[4].buffer.hasDynamicOffset = false;
+    entries[4].buffer.minBindingSize = 0;
+    entries[4].sampler.nextInChain = nullptr;
+    entries[4].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[4].texture.nextInChain = nullptr;
+    entries[4].texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+    entries[4].texture.multisampled = false;
+    entries[4].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[4].storageTexture.nextInChain = nullptr;
+    entries[4].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[4].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[4].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
     WGPUBindGroupLayoutDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.entryCount = 3;
+    descriptor.entryCount = 5;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
@@ -561,6 +655,49 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
 }
 
+WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule)
+{
+    WGPUColorTargetState colorTargetState;
+    colorTargetState.nextInChain = nullptr;
+    colorTargetState.format = surfaceFormat;
+    colorTargetState.blend = nullptr;
+    colorTargetState.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState;
+    fragmentState.nextInChain = nullptr;
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = "envFragmentMain";
+    fragmentState.constantCount = 0;
+    fragmentState.constants = nullptr;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTargetState;
+
+    WGPURenderPipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "env";
+    descriptor.layout = pipelineLayout;
+    descriptor.nextInChain = nullptr;
+    descriptor.vertex.module = shaderModule;
+    descriptor.vertex.entryPoint = "envVertexMain";
+    descriptor.vertex.constantCount = 0;
+    descriptor.vertex.constants = nullptr;
+    descriptor.vertex.bufferCount = 0;
+    descriptor.vertex.buffers = nullptr;
+    descriptor.primitive.nextInChain = nullptr;
+    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+    descriptor.primitive.frontFace = WGPUFrontFace_CCW;
+    descriptor.primitive.cullMode = WGPUCullMode_None;
+    descriptor.depthStencil = nullptr;
+    descriptor.multisample.nextInChain = nullptr;
+    descriptor.multisample.count = 4;
+    descriptor.multisample.mask = -1;
+    descriptor.multisample.alphaToCoverageEnabled = false;
+    descriptor.fragment = &fragmentState;
+
+    return wgpuDeviceCreateRenderPipeline(device, &descriptor);
+}
+
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
 {
     WGPUBufferDescriptor descriptor;
@@ -571,6 +708,18 @@ WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
     descriptor.mappedAtCreation = false;
 
     return wgpuDeviceCreateBuffer(device, &descriptor);
+}
+
+WGPUBindGroup createEmptyBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout)
+{
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 0;
+    descriptor.entries = nullptr;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
 WGPUBindGroup createCameraBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer)
@@ -616,9 +765,10 @@ WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
-WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUSampler shadowSampler, WGPUTextureView shadowMapView)
+WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
+    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView)
 {
-    WGPUBindGroupEntry entries[3];
+    WGPUBindGroupEntry entries[5];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -644,11 +794,27 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     entries[2].sampler = nullptr;
     entries[2].textureView = shadowMapView;
 
+    entries[3].nextInChain = nullptr;
+    entries[3].binding = 3;
+    entries[3].buffer = nullptr;
+    entries[3].offset = 0;
+    entries[3].size = 0;
+    entries[3].sampler = envSampler;
+    entries[3].textureView = nullptr;
+
+    entries[4].nextInChain = nullptr;
+    entries[4].binding = 4;
+    entries[4].buffer = nullptr;
+    entries[4].offset = 0;
+    entries[4].size = 0;
+    entries[4].sampler = nullptr;
+    entries[4].textureView = envMapView;
+
     WGPUBindGroupDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.layout = bindGroupLayout;
-    descriptor.entryCount = 3;
+    descriptor.entryCount = 5;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroup(device, &descriptor);
@@ -685,7 +851,7 @@ WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WG
     colorAttachment.nextInChain = nullptr;
     colorAttachment.view = colorTarget;
     colorAttachment.resolveTarget = resolveTarget;
-    colorAttachment.loadOp = WGPULoadOp_Clear;
+    colorAttachment.loadOp = WGPULoadOp_Load;
     colorAttachment.storeOp = WGPUStoreOp_Store;
     colorAttachment.clearValue = {clearColor.r, clearColor.g, clearColor.b, clearColor.a};
 
@@ -737,6 +903,28 @@ WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, 
     return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
 }
 
+WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget)
+{
+    WGPURenderPassColorAttachment colorAttachment;
+    colorAttachment.nextInChain = nullptr;
+    colorAttachment.view = colorTarget;
+    colorAttachment.resolveTarget = resolveTarget;
+    colorAttachment.loadOp = WGPULoadOp_Clear;
+    colorAttachment.storeOp = WGPUStoreOp_Store;
+    colorAttachment.clearValue = {0.0, 0.0, 0.0, 0.0};
+
+    WGPURenderPassDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &colorAttachment;
+    descriptor.depthStencilAttachment = nullptr;
+    descriptor.occlusionQuerySet = nullptr;
+    descriptor.timestampWrites = nullptr;
+
+    return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
+}
+
 WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder)
 {
     WGPUCommandBufferDescriptor descriptor;
@@ -779,6 +967,25 @@ WGPUSampler createShadowSampler(WGPUDevice device)
     descriptor.lodMinClamp = 0.f;
     descriptor.lodMaxClamp = 0.f;
     descriptor.compare = WGPUCompareFunction_LessEqual;
+    descriptor.maxAnisotropy = 1;
+
+    return wgpuDeviceCreateSampler(device, &descriptor);
+}
+
+WGPUSampler createEnvSampler(WGPUDevice device)
+{
+    WGPUSamplerDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.addressModeU = WGPUAddressMode_Repeat;
+    descriptor.addressModeV = WGPUAddressMode_ClampToEdge;
+    descriptor.addressModeW = WGPUAddressMode_Repeat;
+    descriptor.magFilter = WGPUFilterMode_Nearest;
+    descriptor.minFilter = WGPUFilterMode_Nearest;
+    descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    descriptor.lodMinClamp = 0.f;
+    descriptor.lodMaxClamp = 0.f;
+    descriptor.compare = WGPUCompareFunction_Undefined;
     descriptor.maxAnisotropy = 1;
 
     return wgpuDeviceCreateSampler(device, &descriptor);
@@ -842,4 +1049,49 @@ WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size)
     textureDescriptor.viewFormats = nullptr;
 
     return wgpuDeviceCreateTexture(device, &textureDescriptor);
+}
+
+WGPUTexture createStubEnvTexture(WGPUDevice device, WGPUQueue queue)
+{
+    WGPUTextureDescriptor textureDescriptor;
+    textureDescriptor.nextInChain = nullptr;
+    textureDescriptor.label = nullptr;
+    textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    textureDescriptor.dimension = WGPUTextureDimension_2D;
+    textureDescriptor.size = {1, 2, 1};
+    textureDescriptor.format = WGPUTextureFormat_RGBA32Float;
+    textureDescriptor.mipLevelCount = 1;
+    textureDescriptor.sampleCount = 1;
+    textureDescriptor.viewFormatCount = 0;
+    textureDescriptor.viewFormats = nullptr;
+
+    auto texture = wgpuDeviceCreateTexture(device, &textureDescriptor);
+
+    std::vector<float> pixels =
+    {
+        0.4f, 0.7f, 1.f, 1.f,
+        0.f, 0.f, 0.f, 1.f,
+    };
+
+    WGPUImageCopyTexture imageCopyTexture;
+    imageCopyTexture.nextInChain = nullptr;
+    imageCopyTexture.texture = texture;
+    imageCopyTexture.mipLevel = 0;
+    imageCopyTexture.origin = {0, 0, 0};
+    imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+    WGPUTextureDataLayout textureDataLayout;
+    textureDataLayout.nextInChain = nullptr;
+    textureDataLayout.offset = 0;
+    textureDataLayout.bytesPerRow = 16;
+    textureDataLayout.rowsPerImage = 2;
+
+    WGPUExtent3D writeSize;
+    writeSize.width = 1;
+    writeSize.height = 2;
+    writeSize.depthOrArrayLayers = 1;
+
+    wgpuQueueWriteTexture(queue, &imageCopyTexture, pixels.data(), pixels.size() * sizeof(pixels[0]), &textureDataLayout, &writeSize);
+
+    return texture;
 }

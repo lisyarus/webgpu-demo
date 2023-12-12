@@ -14,6 +14,7 @@ int main()
 {
     Application application;
     Engine engine(application.device(), application.queue());
+    engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
     auto renderObjects = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza.gltf");
 
     auto sceneBbox = engine.bbox(renderObjects);

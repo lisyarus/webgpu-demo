@@ -8,6 +8,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 
+#include <stb_image.h>
+
 #include <atomic>
 #include <thread>
 #include <functional>
@@ -18,6 +20,7 @@ struct Engine::Impl
     Impl(WGPUDevice device, WGPUQueue queue);
     ~Impl();
 
+    void setEnvMap(std::filesystem::path const & hdrImagePath);
     void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
@@ -31,6 +34,7 @@ private:
     SynchronizedQueue<Task> renderQueue_;
     std::thread loaderThread_;
 
+    WGPUBindGroupLayout emptyBindGroupLayout_;
     WGPUBindGroupLayout cameraBindGroupLayout_;
     WGPUBindGroupLayout objectBindGroupLayout_;
     WGPUBindGroupLayout texturesBindGroupLayout_;
@@ -43,18 +47,26 @@ private:
 
     WGPUSampler defaultSampler_;
     WGPUSampler shadowSampler_;
+    WGPUSampler envSampler_;
 
     WGPUPipelineLayout mainPipelineLayout_;
     WGPURenderPipeline mainPipeline_;
     WGPUPipelineLayout shadowPipelineLayout_;
     WGPURenderPipeline shadowPipeline_;
+    WGPUPipelineLayout envPipelineLayout_;
+    WGPURenderPipeline envPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
     WGPUBuffer lightsUniformBuffer_;
 
+    WGPUTexture stubEnvTexture_;
+    WGPUTexture envTexture_;
+    WGPUTextureView envTextureView_;
+
     std::uint64_t objectUniformBufferStride_ = 256;
 
+    WGPUBindGroup emptyBindGroup_;
     WGPUBindGroup cameraBindGroup_;
     WGPUBindGroup objectBindGroup_;
     WGPUBindGroup lightsBindGroup_;
@@ -68,15 +80,16 @@ private:
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
-    void renderShadow(std::vector<RenderObjectPtr> const & objects, glm::mat4 const & shadowProjection);
-    void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView, Camera const & camera, LightSettings const & lightSettings, glm::mat4 const & shadowProjection);
+    void renderShadow(std::vector<RenderObjectPtr> const & objects);
+    void renderEnv(WGPUTextureView targetView);
+    void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
     void updateCameraUniformBuffer(Camera const & camera);
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
-    void updateShadowUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings);
+    void updateLightsUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
 };
@@ -85,6 +98,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     : device_(device)
     , queue_(queue)
     , loaderThread_([this]{ loaderThreadMain(); })
+    , emptyBindGroupLayout_(createEmptyBindGroupLayout(device_))
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
     , objectBindGroupLayout_(createObjectBindGroupLayout(device_))
     , texturesBindGroupLayout_(createTexturesBindGroupLayout(device_))
@@ -94,16 +108,23 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , shadowMapView_(createTextureView(shadowMap_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
+    , envSampler_(createEnvSampler(device_))
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
     , mainPipeline_(nullptr)
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
     , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
+    , envPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, emptyBindGroupLayout_, emptyBindGroupLayout_, lightsBindGroupLayout_}))
+    , envPipeline_(nullptr)
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
+    , stubEnvTexture_(createStubEnvTexture(device_, queue_))
+    , envTexture_(nullptr)
+    , envTextureView_(createTextureView(stubEnvTexture_))
+    , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
-    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_))
+    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
@@ -143,6 +164,64 @@ Engine::Impl::~Impl()
     wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
 }
 
+void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
+{
+    loaderQueue_.push([this, hdrImagePath]{
+        int width, height, channels;
+        float * pixels = stbi_loadf(hdrImagePath.c_str(), &width, &height, &channels, 4);
+
+        WGPUTextureDescriptor textureDescriptor;
+        textureDescriptor.nextInChain = nullptr;
+        textureDescriptor.label = nullptr;
+        textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+        textureDescriptor.dimension = WGPUTextureDimension_2D;
+        textureDescriptor.size = {(std::uint32_t)width, (std::uint32_t)height, 1};
+        textureDescriptor.format = WGPUTextureFormat_RGBA32Float;
+        textureDescriptor.mipLevelCount = 1;
+        textureDescriptor.sampleCount = 1;
+        textureDescriptor.viewFormatCount = 0;
+        textureDescriptor.viewFormats = nullptr;
+
+        WGPUTexture texture = wgpuDeviceCreateTexture(device_, &textureDescriptor);
+
+        renderQueue_.push([this, width, height, pixels, texture]{
+            if (envTexture_)
+                wgpuTextureRelease(envTexture_);
+
+            envTexture_ = texture;
+
+            WGPUImageCopyTexture imageCopyTexture;
+            imageCopyTexture.nextInChain = nullptr;
+            imageCopyTexture.texture = envTexture_;
+            imageCopyTexture.mipLevel = 0;
+            imageCopyTexture.origin = {0, 0, 0};
+            imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+            WGPUTextureDataLayout textureDataLayout;
+            textureDataLayout.nextInChain = nullptr;
+            textureDataLayout.offset = 0;
+            textureDataLayout.bytesPerRow = width * 4 * sizeof(float);
+            textureDataLayout.rowsPerImage = height;
+
+            WGPUExtent3D writeSize;
+            writeSize.width = width;
+            writeSize.height = height;
+            writeSize.depthOrArrayLayers = 1;
+
+            wgpuQueueWriteTexture(queue_, &imageCopyTexture, pixels, width * height * 4 * sizeof(float), &textureDataLayout, &writeSize);
+
+            stbi_image_free(pixels);
+
+            envTextureView_ = createTextureView(envTexture_);
+
+            if (lightsBindGroup_)
+                wgpuBindGroupRelease(lightsBindGroup_);
+
+            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_);
+        });
+    });
+}
+
 void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings)
 {
     for (auto task : renderQueue_.grab())
@@ -153,6 +232,9 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     if (!mainPipeline_)
         mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, surfaceFormat, shaderModule_);
 
+    if (!envPipeline_)
+        envPipeline_ = createEnvPipeline(device_, envPipelineLayout_, surfaceFormat, shaderModule_);
+
     updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)}, surfaceFormat);
 
     updateObjectUniformBuffer(objects);
@@ -161,9 +243,15 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     glm::mat4 shadowProjection = computeShadowProjection(lightSettings.sunDirection, sceneBbox);
 
-    renderShadow(objects, shadowProjection);
+    updateCameraUniformBufferShadow(shadowProjection);
 
-    renderMain(objects, targetView, camera, lightSettings, shadowProjection);
+    renderShadow(objects);
+
+    updateCameraUniformBuffer(camera);
+    updateLightsUniformBuffer(shadowProjection, lightSettings);
+
+    renderEnv(targetView);
+    renderMain(objects, targetView);
 
     wgpuTextureViewRelease(targetView);
 }
@@ -335,16 +423,14 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
     return result;
 }
 
-void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects, glm::mat4 const & shadowProjection)
+void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
 {
-    WGPUCommandEncoder shadowCommandEncoder = createCommandEncoder(device_);
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    updateCameraUniformBufferShadow(shadowProjection);
+    WGPURenderPassEncoder renderPass = createShadowRenderPass(commandEncoder, shadowMapView_);
 
-    WGPURenderPassEncoder shadowRenderPass = createShadowRenderPass(shadowCommandEncoder, shadowMapView_);
-
-    wgpuRenderPassEncoderSetPipeline(shadowRenderPass, shadowPipeline_);
-    wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 0, cameraBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetPipeline(renderPass, shadowPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
 
     for (int i = 0; i < objects.size(); ++i)
     {
@@ -352,31 +438,45 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects, gl
 
         std::uint32_t dynamicOffset = i * objectUniformBufferStride_;
 
-        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 1, objectBindGroup_, 1, &dynamicOffset);
-        wgpuRenderPassEncoderSetBindGroup(shadowRenderPass, 2, object->texturesBindGroup, 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(renderPass, 1, objectBindGroup_, 1, &dynamicOffset);
+        wgpuRenderPassEncoderSetBindGroup(renderPass, 2, object->texturesBindGroup, 0, nullptr);
 
-        wgpuRenderPassEncoderSetVertexBuffer(shadowRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
-        wgpuRenderPassEncoderSetIndexBuffer(shadowRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
-        wgpuRenderPassEncoderDrawIndexed(shadowRenderPass, object->indexCount, 1, 0, 0, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
+        wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
+        wgpuRenderPassEncoderDrawIndexed(renderPass, object->indexCount, 1, 0, 0, 0);
     }
 
-    wgpuRenderPassEncoderEnd(shadowRenderPass);
+    wgpuRenderPassEncoderEnd(renderPass);
 
-    auto shadowCommandBuffer = commandEncoderFinish(shadowCommandEncoder);
-    wgpuQueueSubmit(queue_, 1, &shadowCommandBuffer);
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
 }
 
-void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView, Camera const & camera, LightSettings const & lightSettings, glm::mat4 const & shadowProjection)
+void Engine::Impl::renderEnv(WGPUTextureView targetView)
 {
-    WGPUCommandEncoder mainCommandEncoder = createCommandEncoder(device_);
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    updateCameraUniformBuffer(camera);
-    updateShadowUniformBuffer(shadowProjection, lightSettings);
+    WGPURenderPassEncoder renderPass = createEnvRenderPass(commandEncoder, frameTextureView_, targetView);
+    wgpuRenderPassEncoderSetPipeline(renderPass, envPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 1, emptyBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 2, emptyBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 3, lightsBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(renderPass);
 
-    WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(lightSettings.skyColor, 1.f));
-    wgpuRenderPassEncoderSetPipeline(mainRenderPass, mainPipeline_);
-    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 0, cameraBindGroup_, 0, nullptr);
-    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 3, lightsBindGroup_, 0, nullptr);
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+}
+
+void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView)
+{
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPURenderPassEncoder renderPass = createMainRenderPass(commandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(1.f));
+    wgpuRenderPassEncoderSetPipeline(renderPass, mainPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 3, lightsBindGroup_, 0, nullptr);
 
     for (int i = 0; i < objects.size(); ++i)
     {
@@ -384,18 +484,18 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
 
         std::uint32_t dynamicOffset = i * objectUniformBufferStride_;
 
-        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 1, objectBindGroup_, 1, &dynamicOffset);
-        wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 2, object->texturesBindGroup, 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(renderPass, 1, objectBindGroup_, 1, &dynamicOffset);
+        wgpuRenderPassEncoderSetBindGroup(renderPass, 2, object->texturesBindGroup, 0, nullptr);
 
-        wgpuRenderPassEncoderSetVertexBuffer(mainRenderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
-        wgpuRenderPassEncoderSetIndexBuffer(mainRenderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
-        wgpuRenderPassEncoderDrawIndexed(mainRenderPass, object->indexCount, 1, 0, 0, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
+        wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
+        wgpuRenderPassEncoderDrawIndexed(renderPass, object->indexCount, 1, 0, 0, 0);
     }
 
-    wgpuRenderPassEncoderEnd(mainRenderPass);
+    wgpuRenderPassEncoderEnd(renderPass);
 
-    auto mainCommandBuffer = commandEncoderFinish(mainCommandEncoder);
-    wgpuQueueSubmit(queue_, 1, &mainCommandBuffer);
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
 }
 
 void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat)
@@ -516,15 +616,15 @@ void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProje
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
-void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings)
+void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings)
 {
-    LightsUniform shadowUniform;
-    shadowUniform.shadowProjection = shadowProjection;
-    shadowUniform.ambientLight = lightSettings.ambientLight;
-    shadowUniform.sunDirection = lightSettings.sunDirection;
-    shadowUniform.sunIntensity = lightSettings.sunIntensity;
+    LightsUniform lightsUniform;
+    lightsUniform.shadowProjection = shadowProjection;
+    lightsUniform.ambientLight = lightSettings.ambientLight;
+    lightsUniform.sunDirection = lightSettings.sunDirection;
+    lightsUniform.sunIntensity = lightSettings.sunIntensity;
 
-    wgpuQueueWriteBuffer(queue_, lightsUniformBuffer_, 0, &shadowUniform, sizeof(LightsUniform));
+    wgpuQueueWriteBuffer(queue_, lightsUniformBuffer_, 0, &lightsUniform, sizeof(LightsUniform));
 }
 
 void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
@@ -648,6 +748,11 @@ Engine::~Engine() = default;
 std::vector<RenderObjectPtr> Engine::loadGLTF(std::filesystem::path const & assetPath)
 {
     return pimpl_->loadGLTF(assetPath);
+}
+
+void Engine::setEnvMap(std::filesystem::path const & hdrImagePath)
+{
+    pimpl_->setEnvMap(hdrImagePath);
 }
 
 void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings)

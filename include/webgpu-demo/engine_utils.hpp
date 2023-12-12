@@ -50,6 +50,7 @@ extern const char mainShader[];
 
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code);
 
+WGPUBindGroupLayout createEmptyBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createCameraBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createObjectBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device);
@@ -59,24 +60,30 @@ WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list
 
 WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
 WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 
+WGPUBindGroup createEmptyBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout);
 WGPUBindGroup createCameraBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer);
 WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer);
-WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUSampler shadowSampler, WGPUTextureView shadowMapView);
+WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
+    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView);
 
 WGPUTextureView createTextureView(WGPUTexture texture);
 
 WGPUCommandEncoder createCommandEncoder(WGPUDevice device);
 
-WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView depthTarget);
 WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
+WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView depthTarget);
+WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget);
 
 WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder);
 
 WGPUSampler createDefaultSampler(WGPUDevice device);
 WGPUSampler createShadowSampler(WGPUDevice device);
+WGPUSampler createEnvSampler(WGPUDevice device);
 
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size);
+WGPUTexture createStubEnvTexture(WGPUDevice device, WGPUQueue queue);
