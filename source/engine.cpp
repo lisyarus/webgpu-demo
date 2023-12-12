@@ -51,14 +51,14 @@ namespace
         float padding2[1];
     };
 
-    struct ShadowUniform
+    struct LightsUniform
     {
-        glm::mat4 projection;
+        glm::mat4 shadowProjection;
         glm::vec3 ambientLight;
         float padding1[1];
-        glm::vec3 lightDirection;
+        glm::vec3 sunDirection;
         float padding2[1];
-        glm::vec3 lightIntensity;
+        glm::vec3 sunIntensity;
         float padding3[1];
     };
 
@@ -79,11 +79,11 @@ struct Object {
     emissiveFactor : vec3f,
 }
 
-struct Shadow {
-    projection : mat4x4f,
+struct Lights {
+    shadowProjection : mat4x4f,
     ambientLight : vec3f,
-    lightDirection : vec3f,
-    lightIntensity : vec3f,
+    sunDirection : vec3f,
+    sunIntensity : vec3f,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -95,7 +95,7 @@ struct Shadow {
 @group(2) @binding(2) var normalTexture: texture_2d<f32>;
 @group(2) @binding(3) var metallicRoughnessTexture: texture_2d<f32>;
 
-@group(3) @binding(0) var<uniform> shadow : Shadow;
+@group(3) @binding(0) var<uniform> lights : Lights;
 @group(3) @binding(1) var shadowSampler: sampler_comparison;
 @group(3) @binding(2) var shadowMapTexture: texture_depth_2d;
 
@@ -173,12 +173,12 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let roughness = materialSample.g * object.roughnessFactor;
 
     let viewDirection = normalize(camera.position - in.worldPosition);
-    let halfway = normalize(shadow.lightDirection + viewDirection);
+    let halfway = normalize(lights.sunDirection + viewDirection);
 
-    let lightness = max(0.0, dot(normal, shadow.lightDirection));
+    let lightness = max(0.0, dot(normal, lights.sunDirection));
     let specular = lightness * metallic * pow(max(0.0, dot(viewDirection, halfway)), 1.0 / max(0.0001, roughness * roughness));
 
-    let shadowPositionClip = shadow.projection * vec4(in.worldPosition, 1.0);
+    let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
 
     let shadowPositionNdc = shadowPositionClip.xyz / shadowPositionClip.w;
 
@@ -186,7 +186,7 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z - shadowBias);
 
-    let outColor = (shadow.ambientLight + (lightness + specular) * shadowFactor * shadow.lightIntensity) * baseColor;
+    let outColor = (lights.ambientLight + (lightness + specular) * shadowFactor * lights.sunIntensity) * baseColor;
 
     return vec4f(tonemap(outColor), baseColorSample.a);
 }
@@ -380,7 +380,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
         return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
     }
 
-    WGPUBindGroupLayout createShadowBindGroupLayout(WGPUDevice device)
+    WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     {
         WGPUBindGroupLayoutEntry entries[3];
 
@@ -390,7 +390,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
         entries[0].buffer.nextInChain = nullptr;
         entries[0].buffer.type = WGPUBufferBindingType_Uniform;
         entries[0].buffer.hasDynamicOffset = false;
-        entries[0].buffer.minBindingSize = sizeof(ShadowUniform);
+        entries[0].buffer.minBindingSize = sizeof(LightsUniform);
         entries[0].sampler.nextInChain = nullptr;
         entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
         entries[0].texture.nextInChain = nullptr;
@@ -665,40 +665,40 @@ fn shadowFragmentMain(in : ShadowVertexOutput) {
         return wgpuDeviceCreateBindGroup(device, &descriptor);
     }
 
-    WGPUBindGroup createShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUSampler shadowSampler, WGPUTextureView shadowMapView)
+    WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUSampler shadowSampler, WGPUTextureView shadowMapView)
     {
-        WGPUBindGroupEntry bindGroupEntries[3];
+        WGPUBindGroupEntry entries[3];
 
-        bindGroupEntries[0].nextInChain = nullptr;
-        bindGroupEntries[0].binding = 0;
-        bindGroupEntries[0].buffer = uniformBuffer;
-        bindGroupEntries[0].offset = 0;
-        bindGroupEntries[0].size = sizeof(ShadowUniform);
-        bindGroupEntries[0].sampler = nullptr;
-        bindGroupEntries[0].textureView = nullptr;
+        entries[0].nextInChain = nullptr;
+        entries[0].binding = 0;
+        entries[0].buffer = uniformBuffer;
+        entries[0].offset = 0;
+        entries[0].size = sizeof(LightsUniform);
+        entries[0].sampler = nullptr;
+        entries[0].textureView = nullptr;
 
-        bindGroupEntries[1].nextInChain = nullptr;
-        bindGroupEntries[1].binding = 1;
-        bindGroupEntries[1].buffer = nullptr;
-        bindGroupEntries[1].offset = 0;
-        bindGroupEntries[1].size = 0;
-        bindGroupEntries[1].sampler = shadowSampler;
-        bindGroupEntries[1].textureView = nullptr;
+        entries[1].nextInChain = nullptr;
+        entries[1].binding = 1;
+        entries[1].buffer = nullptr;
+        entries[1].offset = 0;
+        entries[1].size = 0;
+        entries[1].sampler = shadowSampler;
+        entries[1].textureView = nullptr;
 
-        bindGroupEntries[2].nextInChain = nullptr;
-        bindGroupEntries[2].binding = 2;
-        bindGroupEntries[2].buffer = nullptr;
-        bindGroupEntries[2].offset = 0;
-        bindGroupEntries[2].size = 0;
-        bindGroupEntries[2].sampler = nullptr;
-        bindGroupEntries[2].textureView = shadowMapView;
+        entries[2].nextInChain = nullptr;
+        entries[2].binding = 2;
+        entries[2].buffer = nullptr;
+        entries[2].offset = 0;
+        entries[2].size = 0;
+        entries[2].sampler = nullptr;
+        entries[2].textureView = shadowMapView;
 
         WGPUBindGroupDescriptor descriptor;
         descriptor.nextInChain = nullptr;
         descriptor.label = nullptr;
         descriptor.layout = bindGroupLayout;
         descriptor.entryCount = 3;
-        descriptor.entries = bindGroupEntries;
+        descriptor.entries = entries;
 
         return wgpuDeviceCreateBindGroup(device, &descriptor);
     }
@@ -1062,7 +1062,7 @@ private:
     WGPUBindGroupLayout cameraBindGroupLayout_;
     WGPUBindGroupLayout objectBindGroupLayout_;
     WGPUBindGroupLayout texturesBindGroupLayout_;
-    WGPUBindGroupLayout shadowBindGroupLayout_;
+    WGPUBindGroupLayout lightsBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
 
@@ -1079,11 +1079,11 @@ private:
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
-    WGPUBuffer shadowUniformBuffer_;
+    WGPUBuffer lightsUniformBuffer_;
 
     WGPUBindGroup cameraBindGroup_;
     WGPUBindGroup objectBindGroup_;
-    WGPUBindGroup shadowBindGroup_;
+    WGPUBindGroup lightsBindGroup_;
 
     WGPUTexture frameTexture_;
     WGPUTextureView frameTextureView_;
@@ -1110,22 +1110,22 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
     , objectBindGroupLayout_(createObjectBindGroupLayout(device_))
     , texturesBindGroupLayout_(createTexturesBindGroupLayout(device_))
-    , shadowBindGroupLayout_(createShadowBindGroupLayout(device_))
+    , lightsBindGroupLayout_(createLightsBindGroupLayout(device_))
     , shaderModule_(createShaderModule(device_, mainShader))
     , shadowMap_(createShadowMapTexture(device_, 4096))
     , shadowMapView_(createTextureView(shadowMap_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
-    , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, shadowBindGroupLayout_}))
+    , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
     , mainPipeline_(nullptr)
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
     , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
-    , shadowUniformBuffer_(createUniformBuffer(device_, sizeof(ShadowUniform)))
+    , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
-    , shadowBindGroup_(createShadowBindGroup(device_, shadowBindGroupLayout_, shadowUniformBuffer_, shadowSampler_, shadowMapView_))
+    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
@@ -1144,10 +1144,10 @@ Engine::Impl::~Impl()
     wgpuTextureRelease(depthTexture_);
     wgpuTextureViewRelease(frameTextureView_);
     wgpuTextureRelease(frameTexture_);
-    wgpuBindGroupRelease(shadowBindGroup_);
+    wgpuBindGroupRelease(lightsBindGroup_);
     wgpuBindGroupRelease(objectBindGroup_);
     wgpuBindGroupRelease(cameraBindGroup_);
-    wgpuBufferRelease(shadowUniformBuffer_);
+    wgpuBufferRelease(lightsUniformBuffer_);
     wgpuBufferRelease(objectUniformBuffer_);
     wgpuBufferRelease(cameraUniformBuffer_);
     wgpuRenderPipelineRelease(shadowPipeline_);
@@ -1159,7 +1159,7 @@ Engine::Impl::~Impl()
     wgpuTextureViewRelease(shadowMapView_);
     wgpuTextureRelease(shadowMap_);
     wgpuShaderModuleRelease(shaderModule_);
-    wgpuBindGroupLayoutRelease(shadowBindGroupLayout_);
+    wgpuBindGroupLayoutRelease(lightsBindGroupLayout_);
     wgpuBindGroupLayoutRelease(texturesBindGroupLayout_);
     wgpuBindGroupLayoutRelease(objectBindGroupLayout_);
     wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
@@ -1249,7 +1249,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPURenderPassEncoder mainRenderPass = createMainRenderPass(mainCommandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(lightSettings.skyColor, 1.f));
     wgpuRenderPassEncoderSetPipeline(mainRenderPass, mainPipeline_);
     wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 0, cameraBindGroup_, 0, nullptr);
-    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 3, shadowBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(mainRenderPass, 3, lightsBindGroup_, 0, nullptr);
 
     for (int i = 0; i < objects.size(); ++i)
     {
@@ -1535,13 +1535,13 @@ void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProje
 
 void Engine::Impl::updateShadowUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings)
 {
-    ShadowUniform shadowUniform;
-    shadowUniform.projection = shadowProjection;
+    LightsUniform shadowUniform;
+    shadowUniform.shadowProjection = shadowProjection;
     shadowUniform.ambientLight = lightSettings.ambientLight;
-    shadowUniform.lightDirection = lightSettings.sunDirection;
-    shadowUniform.lightIntensity = lightSettings.sunIntensity;
+    shadowUniform.sunDirection = lightSettings.sunDirection;
+    shadowUniform.sunIntensity = lightSettings.sunIntensity;
 
-    wgpuQueueWriteBuffer(queue_, shadowUniformBuffer_, 0, &shadowUniform, sizeof(ShadowUniform));
+    wgpuQueueWriteBuffer(queue_, lightsUniformBuffer_, 0, &shadowUniform, sizeof(LightsUniform));
 }
 
 void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
