@@ -252,16 +252,53 @@ R"(
 @group(0) @binding(0) var input : texture_2d<f32>;
 @group(0) @binding(1) var output : texture_storage_2d<rgba8unorm, write>;
 
+const GAMMA : f32 = 2.2;
+
+fn fromSRGB(c : vec4f) -> vec4f {
+    return vec4f(pow(c.rgb, vec3f(GAMMA)), c.a);
+}
+
+fn toSRGB(c : vec4f) -> vec4f {
+    return vec4f(pow(c.rgb, vec3f(1.0 / GAMMA)), c.a);
+}
+
+fn premult(c : vec4f) -> vec4f {
+    return vec4f(c.rgb * c.a, c.a);
+}
+
+fn unpremult(c : vec4f) -> vec4f {
+    if (c.a == 0.0) {
+        return c;
+    }
+    return vec4f(c.rgb / c.a, c.a);
+}
+
 @compute @workgroup_size(8, 8)
 fn generateMipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     let sum =
-          textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)
-        + textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)
-        + textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)
-        + textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)
+          premult(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0))
+        + premult(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0))
+        + premult(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0))
+        + premult(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0))
         ;
 
-    textureStore(output, id.xy, sum / 4.0);
+    let result = unpremult(sum / 4.0);
+
+    textureStore(output, id.xy, result);
+}
+
+@compute @workgroup_size(8, 8)
+fn generateMipmapSRGB(@builtin(global_invocation_id) id : vec3<u32>) {
+    let sum =
+          premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)))
+        + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)))
+        + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)))
+        + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)))
+        ;
+
+    let result = toSRGB(unpremult(sum / 4.0));
+
+    textureStore(output, id.xy, result);
 }
 
 )";
@@ -812,6 +849,21 @@ WGPUComputePipeline createMipmapPipeline(WGPUDevice device, WGPUPipelineLayout p
     return wgpuDeviceCreateComputePipeline(device, &descriptor);
 }
 
+WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "mipmap";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "generateMipmapSRGB";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
 {
     WGPUBufferDescriptor descriptor;
@@ -966,10 +1018,15 @@ WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bi
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level)
 {
+    return createTextureView(texture, level, wgpuTextureGetFormat(texture));
+}
+
+WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFormat format)
+{
     WGPUTextureViewDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.format = wgpuTextureGetFormat(texture);
+    descriptor.format = format;
     descriptor.dimension = WGPUTextureViewDimension_2D;
     descriptor.baseMipLevel = level;
     descriptor.mipLevelCount = 1;

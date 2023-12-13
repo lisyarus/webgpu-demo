@@ -26,6 +26,7 @@ struct RenderObjectCommon
 
         std::filesystem::path assetPath;
         std::string uri;
+        bool sRGB = false;
 
         std::vector<std::weak_ptr<RenderObject>> users;
     };

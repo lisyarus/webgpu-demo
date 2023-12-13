@@ -64,6 +64,7 @@ WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipe
 WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 
@@ -75,6 +76,7 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
+WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFormat format);
 
 WGPUCommandEncoder createCommandEncoder(WGPUDevice device);
 

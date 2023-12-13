@@ -59,6 +59,7 @@ private:
     WGPURenderPipeline envPipeline_;
     WGPUPipelineLayout genMipmapPipelineLayout_;
     WGPUComputePipeline genMipmapPipeline_;
+    WGPUComputePipeline genMipmapSRGBPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -123,6 +124,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , envPipeline_(nullptr)
     , genMipmapPipelineLayout_(createPipelineLayout(device_, {genMipmapBindGroupLayout_}))
     , genMipmapPipeline_(createMipmapPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
+    , genMipmapSRGBPipeline_(createMipmapSRGBPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
@@ -359,7 +361,11 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 renderObject->textures.normalTextureId = materialIn.normalTexture;
 
                 if (materialIn.baseColorTexture)
-                    common->textures[*materialIn.baseColorTexture]->users.push_back(renderObject);
+                {
+                    auto & textureInfo = common->textures[*materialIn.baseColorTexture];
+                    textureInfo->users.push_back(renderObject);
+                    textureInfo->sRGB = true;
+                }
                 if (materialIn.metallicRoughnessTexture)
                     common->textures[*materialIn.metallicRoughnessTexture]->users.push_back(renderObject);
                 if (materialIn.normalTexture)
@@ -688,11 +694,14 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
         wgpuQueueWriteTexture(queue_, &imageCopyTexture, imageInfo.data.get(), imageInfo.width * imageInfo.height * imageInfo.channels, &textureDataLayout, &writeSize);
     }
 
+    std::vector<WGPUBindGroup> bindGroups;
+
+    bool const useSRGB = (textureInfo.sRGB && sRGBViewFormat);
+    WGPUComputePipeline pipeline = useSRGB ? genMipmapSRGBPipeline_ : genMipmapPipeline_;
+
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
     WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
-    wgpuComputePassEncoderSetPipeline(computePass, genMipmapPipeline_);
-
-    std::vector<WGPUBindGroup> bindGroups;
+    wgpuComputePassEncoderSetPipeline(computePass, pipeline);
 
     for (int level = 1; level < textureDescriptor.mipLevelCount; ++level)
     {
