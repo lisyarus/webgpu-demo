@@ -303,6 +303,28 @@ fn generateMipmapSRGB(@builtin(global_invocation_id) id : vec3<u32>) {
 
 )";
 
+const char genEnvMipmapShader[] =
+R"(
+
+@group(0) @binding(0) var input : texture_2d<f32>;
+@group(0) @binding(1) var output : texture_storage_2d<rgba32float, write>;
+
+@compute @workgroup_size(8, 8)
+fn generateMipmapEnv(@builtin(global_invocation_id) id : vec3<u32>) {
+    let sum =
+          textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)
+        + textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)
+        + textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)
+        + textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)
+        ;
+
+    let result = sum / 4.0;
+
+    textureStore(output, id.xy, result);
+}
+
+)";
+
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
 {
     WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;
@@ -628,6 +650,55 @@ WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Compute;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = 0;
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Compute;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[1].texture.multisampled = false;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+    entries[1].storageTexture.format = WGPUTextureFormat_RGBA32Float;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
 {
     WGPUPipelineLayoutDescriptor descriptor;
@@ -853,11 +924,26 @@ WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayo
 {
     WGPUComputePipelineDescriptor descriptor;
     descriptor.nextInChain = nullptr;
-    descriptor.label = "mipmap";
+    descriptor.label = "mipmapSRGB";
     descriptor.layout = pipelineLayout;
     descriptor.compute.nextInChain = nullptr;
     descriptor.compute.module = shaderModule;
     descriptor.compute.entryPoint = "generateMipmapSRGB";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
+WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "mipmapEnv";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "generateMipmapEnv";
     descriptor.compute.constantCount = 0;
     descriptor.compute.constants = nullptr;
 
@@ -1178,6 +1264,25 @@ WGPUSampler createShadowSampler(WGPUDevice device)
     descriptor.lodMinClamp = 0.f;
     descriptor.lodMaxClamp = 0.f;
     descriptor.compare = WGPUCompareFunction_LessEqual;
+    descriptor.maxAnisotropy = 1;
+
+    return wgpuDeviceCreateSampler(device, &descriptor);
+}
+
+WGPUSampler createEnvSampler(WGPUDevice device)
+{
+    WGPUSamplerDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.addressModeU = WGPUAddressMode_Repeat;
+    descriptor.addressModeV = WGPUAddressMode_ClampToEdge;
+    descriptor.addressModeW = WGPUAddressMode_ClampToEdge;
+    descriptor.magFilter = WGPUFilterMode_Linear;
+    descriptor.minFilter = WGPUFilterMode_Linear;
+    descriptor.mipmapFilter = WGPUMipmapFilterMode_Linear;
+    descriptor.lodMinClamp = 0.f;
+    descriptor.lodMaxClamp = 255.f;
+    descriptor.compare = WGPUCompareFunction_Undefined;
     descriptor.maxAnisotropy = 1;
 
     return wgpuDeviceCreateSampler(device, &descriptor);

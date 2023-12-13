@@ -48,6 +48,7 @@ glm::mat4 glToVkProjection(glm::mat4 matrix);
 
 extern const char mainShader[];
 extern const char genMipmapShader[];
+extern const char genEnvMipmapShader[];
 
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code);
 
@@ -57,6 +58,7 @@ WGPUBindGroupLayout createObjectBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
 
@@ -65,6 +67,7 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
 WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 
@@ -89,6 +92,7 @@ WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder);
 
 WGPUSampler createDefaultSampler(WGPUDevice device);
 WGPUSampler createShadowSampler(WGPUDevice device);
+WGPUSampler createEnvSampler(WGPUDevice device);
 
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size);

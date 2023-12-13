@@ -40,15 +40,18 @@ private:
     WGPUBindGroupLayout texturesBindGroupLayout_;
     WGPUBindGroupLayout lightsBindGroupLayout_;
     WGPUBindGroupLayout genMipmapBindGroupLayout_;
+    WGPUBindGroupLayout genMipmapEnvBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
     WGPUShaderModule genMipmapShaderModule_;
+    WGPUShaderModule genMipmapEnvShaderModule_;
 
     WGPUTexture shadowMap_;
     WGPUTextureView shadowMapView_;
 
     WGPUSampler defaultSampler_;
     WGPUSampler shadowSampler_;
+    WGPUSampler envSampler_;
 
     WGPUPipelineLayout mainPipelineLayout_;
     WGPURenderPipeline mainPipeline_;
@@ -59,6 +62,8 @@ private:
     WGPUPipelineLayout genMipmapPipelineLayout_;
     WGPUComputePipeline genMipmapPipeline_;
     WGPUComputePipeline genMipmapSRGBPipeline_;
+    WGPUPipelineLayout genMipmapEnvPipelineLayout_;
+    WGPUComputePipeline genMipmapEnvPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -108,12 +113,15 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , texturesBindGroupLayout_(createTexturesBindGroupLayout(device_))
     , lightsBindGroupLayout_(createLightsBindGroupLayout(device_))
     , genMipmapBindGroupLayout_(createGenMipmapBindGroupLayout(device_))
+    , genMipmapEnvBindGroupLayout_(createGenEnvMipmapBindGroupLayout(device_))
     , shaderModule_(createShaderModule(device_, mainShader))
     , genMipmapShaderModule_(createShaderModule(device_, genMipmapShader))
+    , genMipmapEnvShaderModule_(createShaderModule(device_, genEnvMipmapShader))
     , shadowMap_(createShadowMapTexture(device_, 4096))
     , shadowMapView_(createTextureView(shadowMap_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
+    , envSampler_(createEnvSampler(device_))
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
     , mainPipeline_(nullptr)
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
@@ -123,6 +131,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , genMipmapPipelineLayout_(createPipelineLayout(device_, {genMipmapBindGroupLayout_}))
     , genMipmapPipeline_(createMipmapPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
     , genMipmapSRGBPipeline_(createMipmapSRGBPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
+    , genMipmapEnvPipelineLayout_(createPipelineLayout(device_, {genMipmapEnvBindGroupLayout_}))
+    , genMipmapEnvPipeline_(createMipmapEnvPipeline(device_, genMipmapEnvPipelineLayout_, genMipmapEnvShaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
@@ -132,7 +142,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
-    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, defaultSampler_, envTextureView_))
+    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
@@ -181,51 +191,96 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
         WGPUTextureDescriptor textureDescriptor;
         textureDescriptor.nextInChain = nullptr;
         textureDescriptor.label = nullptr;
-        textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+        textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_StorageBinding;
         textureDescriptor.dimension = WGPUTextureDimension_2D;
         textureDescriptor.size = {(std::uint32_t)width, (std::uint32_t)height, 1};
         textureDescriptor.format = WGPUTextureFormat_RGBA32Float;
-        textureDescriptor.mipLevelCount = 1;
+        textureDescriptor.mipLevelCount = std::floor(std::log2(std::max(width, height))) + 1;
         textureDescriptor.sampleCount = 1;
         textureDescriptor.viewFormatCount = 0;
         textureDescriptor.viewFormats = nullptr;
 
         WGPUTexture texture = wgpuDeviceCreateTexture(device_, &textureDescriptor);
 
-        renderQueue_.push([this, width, height, pixels, texture]{
+        WGPUImageCopyTexture imageCopyTexture;
+        imageCopyTexture.nextInChain = nullptr;
+        imageCopyTexture.texture = texture;
+        imageCopyTexture.mipLevel = 0;
+        imageCopyTexture.origin = {0, 0, 0};
+        imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+        WGPUTextureDataLayout textureDataLayout;
+        textureDataLayout.nextInChain = nullptr;
+        textureDataLayout.offset = 0;
+        textureDataLayout.bytesPerRow = width * 4 * sizeof(float);
+        textureDataLayout.rowsPerImage = height;
+
+        WGPUExtent3D writeSize;
+        writeSize.width = width;
+        writeSize.height = height;
+        writeSize.depthOrArrayLayers = 1;
+
+        wgpuQueueWriteTexture(queue_, &imageCopyTexture, pixels, width * height * 4 * sizeof(float), &textureDataLayout, &writeSize);
+
+        stbi_image_free(pixels);
+
+        std::vector<WGPUBindGroup> bindGroups;
+
+        WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+        WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
+        wgpuComputePassEncoderSetPipeline(computePass, genMipmapEnvPipeline_);
+
+        for (int level = 1; level < textureDescriptor.mipLevelCount; ++level)
+        {
+            auto inputView = createTextureView(texture, level - 1);
+            auto outputView = createTextureView(texture, level);
+            auto bindGroup = createGenMipmapBindGroup(device_, genMipmapEnvBindGroupLayout_, inputView, outputView);
+
+            int workgroupCountX = std::ceil((width >> level) / 8.f);
+            int workgroupCountY = std::ceil((height >> level) / 8.f);
+
+            wgpuComputePassEncoderSetBindGroup(computePass, 0, bindGroup, 0, nullptr);
+            wgpuComputePassEncoderDispatchWorkgroups(computePass, workgroupCountX, workgroupCountY, 1);
+
+            bindGroups.push_back(bindGroup);
+            wgpuTextureViewRelease(outputView);
+            wgpuTextureViewRelease(inputView);
+        }
+
+        wgpuComputePassEncoderEnd(computePass);
+
+        // Bind groups should live as long as the compute pass lives,
+        // so we defer it's release until the compute pass ends
+        for (auto bindGroup : bindGroups)
+            wgpuBindGroupRelease(bindGroup);
+
+        WGPUCommandBuffer commandBuffer = commandEncoderFinish(commandEncoder);
+        wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+        WGPUTextureViewDescriptor textureViewDescriptor;
+        textureViewDescriptor.nextInChain = nullptr;
+        textureViewDescriptor.label = nullptr;
+        textureViewDescriptor.format = WGPUTextureFormat_RGBA32Float;
+        textureViewDescriptor.dimension = WGPUTextureViewDimension_2D;
+        textureViewDescriptor.baseMipLevel = 0;
+        textureViewDescriptor.mipLevelCount = textureDescriptor.mipLevelCount;
+        textureViewDescriptor.baseArrayLayer = 0;
+        textureViewDescriptor.arrayLayerCount = 1;
+        textureViewDescriptor.aspect = WGPUTextureAspect_All;
+
+        WGPUTextureView textureView = wgpuTextureCreateView(texture, &textureViewDescriptor);
+
+        renderQueue_.push([this, texture, textureView]{
             if (envTexture_)
                 wgpuTextureRelease(envTexture_);
 
             envTexture_ = texture;
-
-            WGPUImageCopyTexture imageCopyTexture;
-            imageCopyTexture.nextInChain = nullptr;
-            imageCopyTexture.texture = envTexture_;
-            imageCopyTexture.mipLevel = 0;
-            imageCopyTexture.origin = {0, 0, 0};
-            imageCopyTexture.aspect = WGPUTextureAspect_All;
-
-            WGPUTextureDataLayout textureDataLayout;
-            textureDataLayout.nextInChain = nullptr;
-            textureDataLayout.offset = 0;
-            textureDataLayout.bytesPerRow = width * 4 * sizeof(float);
-            textureDataLayout.rowsPerImage = height;
-
-            WGPUExtent3D writeSize;
-            writeSize.width = width;
-            writeSize.height = height;
-            writeSize.depthOrArrayLayers = 1;
-
-            wgpuQueueWriteTexture(queue_, &imageCopyTexture, pixels, width * height * 4 * sizeof(float), &textureDataLayout, &writeSize);
-
-            stbi_image_free(pixels);
-
-            envTextureView_ = createTextureView(envTexture_);
+            envTextureView_ = textureView;
 
             if (lightsBindGroup_)
                 wgpuBindGroupRelease(lightsBindGroup_);
 
-            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, defaultSampler_, envTextureView_);
+            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_);
         });
     });
 }
