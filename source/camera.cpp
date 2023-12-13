@@ -29,7 +29,7 @@ void Camera::setClip(float near, float far)
 
 void Camera::setSpeed(float speed)
 {
-    speed_ = speed;
+    baseSpeed_ = speed;
 }
 
 void Camera::rotate(float deltaX, float deltaY)
@@ -43,10 +43,10 @@ void Camera::rotate(float deltaX, float deltaY)
 
 void Camera::update(float dt, UpdateData const & updateData)
 {
-    float const smoothnessFactor = - std::expm1(- dt * smoothness_);
+    float const rotationSmoothnessFactor = - std::expm1(- dt / rotationSmoothness_);
 
-    xAngle_ += (xAngleTarget_ - xAngle_) * smoothnessFactor;
-    yAngle_ += (yAngleTarget_ - yAngle_) * smoothnessFactor;
+    xAngle_ += (xAngleTarget_ - xAngle_) * rotationSmoothnessFactor;
+    yAngle_ += (yAngleTarget_ - yAngle_) * rotationSmoothnessFactor;
 
     glm::vec3 const forward = glm::vec3(
           std::cos(yAngle_) * std::sin(xAngle_),
@@ -60,20 +60,29 @@ void Camera::update(float dt, UpdateData const & updateData)
        std::sin(xAngle_)
    );
 
-    float speed = speed_;
+    float speedTarget = baseSpeed_;
     if (updateData.movingFast)
-        speed *= 5.f;
+        speedTarget *= 5.f;
     if (updateData.movingSlow)
-        speed /= 20.f;
+        speedTarget /= 10.f;
 
+    glm::vec3 velocityTarget{0.f};
     if (updateData.movingForward)
-        position_ += forward * speed * dt;
+        velocityTarget += forward;
     if (updateData.movingBackward)
-        position_ -= forward * speed * dt;
+        velocityTarget -= forward;
     if (updateData.movingLeft)
-        position_ -= right * speed * dt;
+        velocityTarget -= right;
     if (updateData.movingRight)
-        position_ += right * speed * dt;
+        velocityTarget += right;
+
+    if (glm::length(velocityTarget) > 1e-6)
+        velocityTarget = glm::normalize(velocityTarget) * speedTarget;
+
+    float const velocitySmoothnessFactor = - std::expm1(- dt / velocitySmoothness_);
+    currentVelocity_ += (velocityTarget - currentVelocity_) * velocitySmoothnessFactor;
+
+    position_ += currentVelocity_ * dt;
 }
 
 glm::mat4 Camera::viewMatrix() const

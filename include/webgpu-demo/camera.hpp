@@ -40,6 +40,8 @@ private:
     float far_ = 100.f;
 
     float sensitivity_ = 0.003f;
-    float speed_ = 5.f;
-    float smoothness_ = 20.f;
+    float baseSpeed_ = 5.f;
+    glm::vec3 currentVelocity_ = glm::vec3(0.f);
+    float rotationSmoothness_ = 0.05f;
+    float velocitySmoothness_ = 0.08f;
 };
