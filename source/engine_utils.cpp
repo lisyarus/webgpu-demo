@@ -288,30 +288,34 @@ fn unpremult(c : vec4f) -> vec4f {
 
 @compute @workgroup_size(8, 8)
 fn generateMipmap(@builtin(global_invocation_id) id : vec3<u32>) {
-    let sum =
-          premult(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0))
-        + premult(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0))
-        + premult(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0))
-        + premult(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0))
-        ;
+    if (all(id.xy < textureDimensions(output))) {
+        let sum =
+              premult(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0))
+            + premult(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0))
+            + premult(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0))
+            + premult(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0))
+            ;
 
-    let result = unpremult(sum / 4.0);
+        let result = unpremult(sum / 4.0);
 
-    textureStore(output, id.xy, result);
+        textureStore(output, id.xy, result);
+    }
 }
 
 @compute @workgroup_size(8, 8)
 fn generateMipmapSRGB(@builtin(global_invocation_id) id : vec3<u32>) {
-    let sum =
-          premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)))
-        + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)))
-        + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)))
-        + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)))
-        ;
+    if (all(id.xy < textureDimensions(output))) {
+        let sum =
+              premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)))
+            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)))
+            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)))
+            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)))
+            ;
 
-    let result = toSRGB(unpremult(sum / 4.0));
+        let result = toSRGB(unpremult(sum / 4.0));
 
-    textureStore(output, id.xy, result);
+        textureStore(output, id.xy, result);
+    }
 }
 
 )";
@@ -324,16 +328,18 @@ R"(
 
 @compute @workgroup_size(8, 8)
 fn generateMipmapEnv(@builtin(global_invocation_id) id : vec3<u32>) {
-    let sum =
-          textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)
-        + textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)
-        + textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)
-        + textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)
-        ;
+    if (all(id.xy < textureDimensions(output))) {
+        let sum =
+              textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)
+            + textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)
+            + textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)
+            + textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)
+            ;
 
-    let result = sum / 4.0;
+        let result = sum / 4.0;
 
-    textureStore(output, id.xy, result);
+        textureStore(output, id.xy, result);
+    }
 }
 
 )";
