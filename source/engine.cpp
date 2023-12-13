@@ -39,8 +39,10 @@ private:
     WGPUBindGroupLayout objectBindGroupLayout_;
     WGPUBindGroupLayout texturesBindGroupLayout_;
     WGPUBindGroupLayout lightsBindGroupLayout_;
+    WGPUBindGroupLayout genMipmapBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
+    WGPUShaderModule genMipmapShaderModule_;
 
     WGPUTexture shadowMap_;
     WGPUTextureView shadowMapView_;
@@ -55,6 +57,8 @@ private:
     WGPURenderPipeline shadowPipeline_;
     WGPUPipelineLayout envPipelineLayout_;
     WGPURenderPipeline envPipeline_;
+    WGPUPipelineLayout genMipmapPipelineLayout_;
+    WGPUComputePipeline genMipmapPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -103,7 +107,9 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , objectBindGroupLayout_(createObjectBindGroupLayout(device_))
     , texturesBindGroupLayout_(createTexturesBindGroupLayout(device_))
     , lightsBindGroupLayout_(createLightsBindGroupLayout(device_))
+    , genMipmapBindGroupLayout_(createGenMipmapBindGroupLayout(device_))
     , shaderModule_(createShaderModule(device_, mainShader))
+    , genMipmapShaderModule_(createShaderModule(device_, genMipmapShader))
     , shadowMap_(createShadowMapTexture(device_, 4096))
     , shadowMapView_(createTextureView(shadowMap_))
     , defaultSampler_(createDefaultSampler(device_))
@@ -115,6 +121,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
     , envPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, emptyBindGroupLayout_, emptyBindGroupLayout_, lightsBindGroupLayout_}))
     , envPipeline_(nullptr)
+    , genMipmapPipelineLayout_(createPipelineLayout(device_, {genMipmapBindGroupLayout_}))
+    , genMipmapPipeline_(createMipmapPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
@@ -635,7 +643,7 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
     WGPUTextureDescriptor textureDescriptor;
     textureDescriptor.nextInChain = nullptr;
     textureDescriptor.label = nullptr;
-    textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_StorageBinding;
     textureDescriptor.dimension = WGPUTextureDimension_2D;
     textureDescriptor.size = {(std::uint32_t)imageInfo.width, (std::uint32_t)imageInfo.height, 1};
 
@@ -658,67 +666,60 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
 
     auto texture = wgpuDeviceCreateTexture(device_, &textureDescriptor);
 
-    std::vector<unsigned char> levelPixels;
-    int levelWidth = imageInfo.width;
-    int levelHeight = imageInfo.height;
-
-    for (int i = 0; i < textureDescriptor.mipLevelCount; ++i)
     {
-        if (levelPixels.empty())
-        {
-            levelPixels.assign(imageInfo.data.get(), imageInfo.data.get() + imageInfo.width * imageInfo.height * imageInfo.channels);
-        }
-        else
-        {
-            int newLevelWidth = levelWidth / 2;
-            int newLevelHeight = levelHeight / 2;
-            std::vector<unsigned char> newLevelPixels(newLevelWidth * newLevelHeight * imageInfo.channels, 0);
+        WGPUImageCopyTexture imageCopyTexture;
+        imageCopyTexture.nextInChain = nullptr;
+        imageCopyTexture.texture = texture;
+        imageCopyTexture.mipLevel = 0;
+        imageCopyTexture.origin = {0, 0, 0};
+        imageCopyTexture.aspect = WGPUTextureAspect_All;
 
-            for (int y = 0; y < newLevelHeight; ++y)
-            {
-                for (int x = 0; x < newLevelWidth; ++x)
-                {
-                    for (int c = 0; c < imageInfo.channels; ++c)
-                    {
-                        int sum = 0;
-                        sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
-                        sum += levelPixels[((2 * y + 0) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
-                        sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 0)) * imageInfo.channels + c];
-                        sum += levelPixels[((2 * y + 1) * levelWidth + (2 * x + 1)) * imageInfo.channels + c];
-                        newLevelPixels[(y * newLevelWidth + x) * imageInfo.channels + c] = sum >> 2;
-                    }
-                }
-            }
+        WGPUTextureDataLayout textureDataLayout;
+        textureDataLayout.nextInChain = nullptr;
+        textureDataLayout.offset = 0;
+        textureDataLayout.bytesPerRow = imageInfo.width * imageInfo.channels;
+        textureDataLayout.rowsPerImage = imageInfo.height;
 
-            levelHeight = newLevelHeight;
-            levelWidth = newLevelWidth;
-            levelPixels = std::move(newLevelPixels);
-        }
+        WGPUExtent3D writeSize;
+        writeSize.width = imageInfo.width;
+        writeSize.height = imageInfo.height;
+        writeSize.depthOrArrayLayers = 1;
 
-        // This should be possible to do in the loader thread once
-        // wgpu-0.19 releases, see https://github.com/gfx-rs/wgpu/issues/4859
-        renderQueue_.push([=, this, channels = imageInfo.channels]{
-            WGPUImageCopyTexture imageCopyTexture;
-            imageCopyTexture.nextInChain = nullptr;
-            imageCopyTexture.texture = texture;
-            imageCopyTexture.mipLevel = i;
-            imageCopyTexture.origin = {0, 0, 0};
-            imageCopyTexture.aspect = WGPUTextureAspect_All;
-
-            WGPUTextureDataLayout textureDataLayout;
-            textureDataLayout.nextInChain = nullptr;
-            textureDataLayout.offset = 0;
-            textureDataLayout.bytesPerRow = levelWidth * channels;
-            textureDataLayout.rowsPerImage = levelHeight;
-
-            WGPUExtent3D writeSize;
-            writeSize.width = levelWidth;
-            writeSize.height = levelHeight;
-            writeSize.depthOrArrayLayers = 1;
-
-            wgpuQueueWriteTexture(queue_, &imageCopyTexture, levelPixels.data(), levelPixels.size(), &textureDataLayout, &writeSize);
-        });
+        wgpuQueueWriteTexture(queue_, &imageCopyTexture, imageInfo.data.get(), imageInfo.width * imageInfo.height * imageInfo.channels, &textureDataLayout, &writeSize);
     }
+
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+    WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
+    wgpuComputePassEncoderSetPipeline(computePass, genMipmapPipeline_);
+
+    std::vector<WGPUBindGroup> bindGroups;
+
+    for (int level = 1; level < textureDescriptor.mipLevelCount; ++level)
+    {
+        auto inputView = createTextureView(texture, level - 1);
+        auto outputView = createTextureView(texture, level);
+        auto bindGroup = createGenMipmapBindGroup(device_, genMipmapBindGroupLayout_, inputView, outputView);
+
+        int workgroupCountX = std::ceil((imageInfo.width >> level) / 8.f);
+        int workgroupCountY = std::ceil((imageInfo.height >> level) / 8.f);
+
+        wgpuComputePassEncoderSetBindGroup(computePass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(computePass, workgroupCountX, workgroupCountY, 1);
+
+        bindGroups.push_back(bindGroup);
+        wgpuTextureViewRelease(outputView);
+        wgpuTextureViewRelease(inputView);
+    }
+
+    wgpuComputePassEncoderEnd(computePass);
+
+    // Bind groups should live as long as the compute pass lives,
+    // so we defer it's release until the compute pass ends
+    for (auto bindGroup : bindGroups)
+        wgpuBindGroupRelease(bindGroup);
+
+    WGPUCommandBuffer commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
 
     textureInfo.texture.store(texture);
 

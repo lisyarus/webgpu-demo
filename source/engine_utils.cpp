@@ -246,6 +246,26 @@ fn envFragmentMain(in : EnvVertexOutput) -> @location(0) vec4f {
 
 )";
 
+const char genMipmapShader[] =
+R"(
+
+@group(0) @binding(0) var input : texture_2d<f32>;
+@group(0) @binding(1) var output : texture_storage_2d<rgba8unorm, write>;
+
+@compute @workgroup_size(8, 8)
+fn generateMipmap(@builtin(global_invocation_id) id : vec3<u32>) {
+    let sum =
+          textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)
+        + textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)
+        + textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)
+        + textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)
+        ;
+
+    textureStore(output, id.xy, sum / 4.0);
+}
+
+)";
+
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
 {
     WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;
@@ -522,6 +542,55 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Compute;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = 0;
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Compute;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[1].texture.multisampled = false;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+    entries[1].storageTexture.format = WGPUTextureFormat_RGBA8Unorm;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
 {
     WGPUPipelineLayoutDescriptor descriptor;
@@ -728,6 +797,21 @@ WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipel
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
 }
 
+WGPUComputePipeline createMipmapPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "mipmap";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "generateMipmap";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
 {
     WGPUBufferDescriptor descriptor;
@@ -850,14 +934,44 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
-WGPUTextureView createTextureView(WGPUTexture texture)
+WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output)
+{
+    WGPUBindGroupEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].buffer = 0;
+    entries[0].offset = 0;
+    entries[0].size = 0;
+    entries[0].sampler = nullptr;
+    entries[0].textureView = input;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].buffer = 0;
+    entries[1].offset = 0;
+    entries[1].size = 0;
+    entries[1].sampler = nullptr;
+    entries[1].textureView = output;
+
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
+}
+
+WGPUTextureView createTextureView(WGPUTexture texture, int level)
 {
     WGPUTextureViewDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.format = wgpuTextureGetFormat(texture);
     descriptor.dimension = WGPUTextureViewDimension_2D;
-    descriptor.baseMipLevel = 0;
+    descriptor.baseMipLevel = level;
     descriptor.mipLevelCount = 1;
     descriptor.baseArrayLayer = 0;
     descriptor.arrayLayerCount = 1;
@@ -953,6 +1067,16 @@ WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGP
     descriptor.timestampWrites = nullptr;
 
     return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
+}
+
+WGPUComputePassEncoder createComputePass(WGPUCommandEncoder commandEncoder)
+{
+    WGPUComputePassDescriptor descriptor;
+    descriptor.label = nullptr;
+    descriptor.nextInChain = nullptr;
+    descriptor.timestampWrites = nullptr;
+
+    return wgpuCommandEncoderBeginComputePass(commandEncoder, &descriptor);
 }
 
 WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder)
