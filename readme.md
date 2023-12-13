@@ -1,6 +1,6 @@
 # About
 
-A demo WebGPU renderer written on streams at twitch.tv/lisyarus, mostly for me to get familiar with WebGPU.
+A demo WebGPU renderer written partially on streams at [twitch.tv/lisyarus](twitch.tv/lisyarus), mostly for me to get familiar with WebGPU.
 
 It uses wgpu-native WebGPU implementation, and SDL2 to create a window to render to.
 
@@ -16,7 +16,7 @@ To build this project, you need
 * [SDL2](https://www.libsdl.org/) (you can probably install it via your system's package manager)
 * [wgpu-native](https://github.com/gfx-rs/wgpu-native)
 
-To install wgpu-native, download [some release archive](https://github.com/gfx-rs/wgpu-native/releases) for your platform, and unpack it somewhere. This project was built with the [v0.18.1.3](https://github.com/gfx-rs/wgpu-native/releases/tag/v0.18.1.3) release, and might not work with other version.
+To install wgpu-native, download [some release archive](https://github.com/gfx-rs/wgpu-native/releases) for your platform, and unpack it somewhere. ~~This project was built with the [v0.18.1.3](https://github.com/gfx-rs/wgpu-native/releases/tag/v0.18.1.3) release, and might not work with other version.~~ See **Update 2** below.
 
 Don't forget to check out submodules:
 * [glm](https://github.com/g-truc/glm) for vector & matrix maths
@@ -33,6 +33,8 @@ Then, follow the usual steps for building something with CMake:
 Note that in case of MacOS, linking dynamic wgpu-native library (`libwgpu_native.dylib`) doesn't fully work right now due to a [bug](https://github.com/gfx-rs/wgpu-native/issues/329). The static version (`libwgpu_native.a`) works, though, so you can simply delete the dynamic library so that CMake uses the static one instead.
 
 **Update**: this issue is fixed in the [v0.18.1.4](https://github.com/gfx-rs/wgpu-native/releases/tag/v0.18.1.4) release.
+
+**Update 2**: filtering floating-point textures and submitting queue commands from a different thread will work reliably only in wgpu version v0.19 (scheduled to release on 14 Jan 2024), but I'm already relying on these features, so to run the project you need one of the latest trunk builds, [like this one](https://github.com/gfx-rs/wgpu-native/actions/runs/7192422937). Download the `dist` artifact from the bottom of this page, it will contain the builds for all systems and architectures.
 
 # SDL2-wgpu
 
