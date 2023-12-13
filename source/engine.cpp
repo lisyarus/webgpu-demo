@@ -514,9 +514,13 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
     }
 
     wgpuRenderPassEncoderEnd(renderPass);
+    wgpuRenderPassEncoderRelease(renderPass);
 
     auto commandBuffer = commandEncoderFinish(commandEncoder);
     wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
 }
 
 void Engine::Impl::renderEnv(WGPUTextureView targetView)
@@ -532,8 +536,13 @@ void Engine::Impl::renderEnv(WGPUTextureView targetView)
     wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
     wgpuRenderPassEncoderEnd(renderPass);
 
+    wgpuRenderPassEncoderRelease(renderPass);
+
     auto commandBuffer = commandEncoderFinish(commandEncoder);
     wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
 }
 
 void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView)
@@ -560,9 +569,13 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
     }
 
     wgpuRenderPassEncoderEnd(renderPass);
+    wgpuRenderPassEncoderRelease(renderPass);
 
     auto commandBuffer = commandEncoderFinish(commandEncoder);
     wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
 }
 
 void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat)
