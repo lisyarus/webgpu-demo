@@ -121,7 +121,20 @@ fn envDirectionToTexcoord(dir : vec3f) -> vec2f {
 }
 
 fn sampleEnvMap(dir : vec3f) -> vec3f {
-    return textureSample(envMapTexture, envSampler, envDirectionToTexcoord(dir)).rgb * lights.envIntensity;
+    // Help the GPU with mipmap selection
+    // on cylindrical X coordinate border
+
+    let texcoord1 = envDirectionToTexcoord(dir);
+    let texcoord2 = vec2f(modf(texcoord1.x + 0.5).fract - 0.5, texcoord1.y);
+
+    let sample1 = textureSample(envMapTexture, envSampler, texcoord1).rgb * lights.envIntensity;
+    let sample2 = textureSample(envMapTexture, envSampler, texcoord2).rgb * lights.envIntensity;
+
+    if (abs(texcoord1.x - 0.5) < 0.25) {
+        return sample1;
+    } else {
+        return sample2;
+    }
 }
 
 fn specularD(halfway : vec3f, normal : vec3f, alpha2 : f32) -> f32 {
