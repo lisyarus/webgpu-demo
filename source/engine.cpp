@@ -49,7 +49,6 @@ private:
 
     WGPUSampler defaultSampler_;
     WGPUSampler shadowSampler_;
-    WGPUSampler envSampler_;
 
     WGPUPipelineLayout mainPipelineLayout_;
     WGPURenderPipeline mainPipeline_;
@@ -115,7 +114,6 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , shadowMapView_(createTextureView(shadowMap_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
-    , envSampler_(createEnvSampler(device_))
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
     , mainPipeline_(nullptr)
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
@@ -134,7 +132,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
-    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_))
+    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, defaultSampler_, envTextureView_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
@@ -227,7 +225,7 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
             if (lightsBindGroup_)
                 wgpuBindGroupRelease(lightsBindGroup_);
 
-            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_);
+            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, defaultSampler_, envTextureView_);
         });
     });
 }

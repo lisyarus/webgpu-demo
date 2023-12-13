@@ -119,11 +119,16 @@ Application::Application()
     requiredLimits.nextInChain = nullptr;
     requiredLimits.limits = supportedLimits.limits;
 
+    WGPUFeatureName requiredFeatures[1]
+    {
+        WGPUFeatureName_Float32Filterable,
+    };
+
     WGPUDeviceDescriptor deviceDescriptor;
     deviceDescriptor.nextInChain = nullptr;
     deviceDescriptor.label = nullptr;
-    deviceDescriptor.requiredFeatureCount = 0;
-    deviceDescriptor.requiredFeatures = nullptr;
+    deviceDescriptor.requiredFeatureCount = 1;
+    deviceDescriptor.requiredFeatures = requiredFeatures;
     deviceDescriptor.requiredLimits = &requiredLimits;
     deviceDescriptor.defaultQueue.nextInChain = nullptr;
     deviceDescriptor.defaultQueue.label = nullptr;

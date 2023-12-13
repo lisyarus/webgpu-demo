@@ -542,7 +542,7 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[3].buffer.hasDynamicOffset = false;
     entries[3].buffer.minBindingSize = 0;
     entries[3].sampler.nextInChain = nullptr;
-    entries[3].sampler.type = WGPUSamplerBindingType_NonFiltering;
+    entries[3].sampler.type = WGPUSamplerBindingType_Filtering;
     entries[3].texture.nextInChain = nullptr;
     entries[3].texture.sampleType = WGPUTextureSampleType_Undefined;
     entries[3].texture.multisampled = false;
@@ -562,7 +562,7 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[4].sampler.nextInChain = nullptr;
     entries[4].sampler.type = WGPUSamplerBindingType_Undefined;
     entries[4].texture.nextInChain = nullptr;
-    entries[4].texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+    entries[4].texture.sampleType = WGPUTextureSampleType_Float;
     entries[4].texture.multisampled = false;
     entries[4].texture.viewDimension = WGPUTextureViewDimension_2D;
     entries[4].storageTexture.nextInChain = nullptr;
@@ -1178,25 +1178,6 @@ WGPUSampler createShadowSampler(WGPUDevice device)
     descriptor.lodMinClamp = 0.f;
     descriptor.lodMaxClamp = 0.f;
     descriptor.compare = WGPUCompareFunction_LessEqual;
-    descriptor.maxAnisotropy = 1;
-
-    return wgpuDeviceCreateSampler(device, &descriptor);
-}
-
-WGPUSampler createEnvSampler(WGPUDevice device)
-{
-    WGPUSamplerDescriptor descriptor;
-    descriptor.nextInChain = nullptr;
-    descriptor.label = nullptr;
-    descriptor.addressModeU = WGPUAddressMode_Repeat;
-    descriptor.addressModeV = WGPUAddressMode_ClampToEdge;
-    descriptor.addressModeW = WGPUAddressMode_Repeat;
-    descriptor.magFilter = WGPUFilterMode_Nearest;
-    descriptor.minFilter = WGPUFilterMode_Nearest;
-    descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
-    descriptor.lodMinClamp = 0.f;
-    descriptor.lodMaxClamp = 0.f;
-    descriptor.compare = WGPUCompareFunction_Undefined;
     descriptor.maxAnisotropy = 1;
 
     return wgpuDeviceCreateSampler(device, &descriptor);

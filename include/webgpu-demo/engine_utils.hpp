@@ -89,7 +89,6 @@ WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder);
 
 WGPUSampler createDefaultSampler(WGPUDevice device);
 WGPUSampler createShadowSampler(WGPUDevice device);
-WGPUSampler createEnvSampler(WGPUDevice device);
 
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size);
