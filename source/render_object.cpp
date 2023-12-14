@@ -88,6 +88,10 @@ void RenderObject::createTexturesBindGroup(WGPUDevice device, WGPUBindGroupLayou
     descriptor.entries = entries;
 
     texturesBindGroup = wgpuDeviceCreateBindGroup(device, &descriptor);
+
+    for (auto const & entry : entries)
+        if (entry.textureView)
+            wgpuTextureViewRelease(entry.textureView);
 }
 
 RenderObject::~RenderObject()
