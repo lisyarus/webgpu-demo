@@ -290,10 +290,10 @@ fn unpremult(c : vec4f) -> vec4f {
 fn generateMipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     if (all(id.xy < textureDimensions(output))) {
         let sum =
-              premult(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0))
-            + premult(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0))
-            + premult(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0))
-            + premult(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0))
+              premult(textureLoad(input, 2u * id.xy + vec2u(0u, 0u), 0))
+            + premult(textureLoad(input, 2u * id.xy + vec2u(0u, 1u), 0))
+            + premult(textureLoad(input, 2u * id.xy + vec2u(1u, 0u), 0))
+            + premult(textureLoad(input, 2u * id.xy + vec2u(1u, 1u), 0))
             ;
 
         let result = unpremult(sum / 4.0);
@@ -306,10 +306,10 @@ fn generateMipmap(@builtin(global_invocation_id) id : vec3<u32>) {
 fn generateMipmapSRGB(@builtin(global_invocation_id) id : vec3<u32>) {
     if (all(id.xy < textureDimensions(output))) {
         let sum =
-              premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)))
-            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)))
-            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)))
-            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)))
+              premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0u, 0u), 0)))
+            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(0u, 1u), 0)))
+            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1u, 0u), 0)))
+            + premult(fromSRGB(textureLoad(input, 2u * id.xy + vec2u(1u, 1u), 0)))
             ;
 
         let result = toSRGB(unpremult(sum / 4.0));
@@ -330,10 +330,10 @@ R"(
 fn generateMipmapEnv(@builtin(global_invocation_id) id : vec3<u32>) {
     if (all(id.xy < textureDimensions(output))) {
         let sum =
-              textureLoad(input, 2u * id.xy + vec2u(0, 0), 0)
-            + textureLoad(input, 2u * id.xy + vec2u(0, 1), 0)
-            + textureLoad(input, 2u * id.xy + vec2u(1, 0), 0)
-            + textureLoad(input, 2u * id.xy + vec2u(1, 1), 0)
+              textureLoad(input, 2u * id.xy + vec2u(0u, 0u), 0)
+            + textureLoad(input, 2u * id.xy + vec2u(0u, 1u), 0)
+            + textureLoad(input, 2u * id.xy + vec2u(1u, 0u), 0)
+            + textureLoad(input, 2u * id.xy + vec2u(1u, 1u), 0)
             ;
 
         let result = sum / 4.0;

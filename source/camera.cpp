@@ -2,6 +2,8 @@
 
 #include <glm/gtx/transform.hpp>
 
+#include <algorithm>
+
 void Camera::move(glm::vec3 const & position)
 {
     position_ = position;
