@@ -34,7 +34,7 @@ Note that in case of MacOS, linking dynamic wgpu-native library (`libwgpu_native
 
 **Update**: this issue is fixed in the [v0.18.1.4](https://github.com/gfx-rs/wgpu-native/releases/tag/v0.18.1.4) release.
 
-**Update 2**: filtering floating-point textures and submitting queue commands from a different thread will work reliably only in wgpu version v0.19 (scheduled to release on 14 Jan 2024), but I'm already relying on these features, so to run the project you need one of the latest trunk builds, [like this one](https://github.com/gfx-rs/wgpu-native/actions/runs/7192422937). Download the `dist` artifact from the bottom of this page, it will contain the builds for all systems and architectures.
+**Update 2**: filtering floating-point textures and submitting queue commands from a different thread will work reliably only in wgpu version v0.19 (scheduled to release on [17 Jan 2024](https://github.com/gfx-rs/wgpu/milestone/18)), but I'm already relying on these features, so to run the project you need one of the latest trunk builds, [like this one](https://github.com/gfx-rs/wgpu-native/actions/runs/7192422937). Download the `dist` artifact from the bottom of this page, it will contain the builds for all systems and architectures.
 
 # SDL2-wgpu
 
