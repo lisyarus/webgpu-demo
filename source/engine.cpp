@@ -794,7 +794,14 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
         wgpuBindGroupRelease(bindGroup);
 
     WGPUCommandBuffer commandBuffer = commandEncoderFinish(commandEncoder);
-    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    // This is probably a bug in wgpu, but submitting a compute pass
+    // in a separate thread causes GPU hangs or device loss, see
+    // https://github.com/gfx-rs/wgpu/issues/4877
+    renderQueue_.push([this, commandBuffer]
+    {
+        wgpuQueueSubmit(queue_, 1, &commandBuffer);
+    });
 
     textureInfo.texture.store(texture);
 
