@@ -116,7 +116,7 @@ int main()
                 .skyColor = {0.4f, 0.7f, 1.f},
                 .ambientLight = {0.5f, 0.4f, 0.3f},
                 .envIntensity = 0.5f,
-                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
+                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 2.f, std::sin(time * 0.1f)}),
                 .sunIntensity = {20.f, 16.f, 12.f},
             };
         }
@@ -127,7 +127,7 @@ int main()
                 .skyColor = {0.0f, 0.0f, 0.001f},
                 .ambientLight = {0.05f, 0.1f, 0.15f},
                 .envIntensity = 0.05f,
-                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 3.f, std::sin(time * 0.1f)}),
+                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 2.f, std::sin(time * 0.1f)}),
                 .sunIntensity = {1.f, 2.f, 3.f},
             };
         }
