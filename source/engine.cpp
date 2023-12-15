@@ -28,6 +28,8 @@ private:
     WGPUDevice device_;
     WGPUQueue queue_;
 
+    std::uint64_t uniformBufferStride_;
+
     using Task = std::function<void()>;
 
     SynchronizedQueue<Task> loaderQueue_;
@@ -41,15 +43,20 @@ private:
     WGPUBindGroupLayout lightsBindGroupLayout_;
     WGPUBindGroupLayout genMipmapBindGroupLayout_;
     WGPUBindGroupLayout genMipmapEnvBindGroupLayout_;
+    WGPUBindGroupLayout summedAreaShadowTexturesBindGroupLayout_;
+    WGPUBindGroupLayout summedAreaShadowUniformsBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
     WGPUShaderModule genMipmapShaderModule_;
     WGPUShaderModule genMipmapEnvShaderModule_;
+    WGPUShaderModule summedAreaShadowShaderModule_;
 
     WGPUTexture shadowMap_;
     WGPUTexture shadowMapDepth_;
+    WGPUTexture shadowMapAux_;
     WGPUTextureView shadowMapView_;
     WGPUTextureView shadowMapDepthView_;
+    WGPUTextureView shadowMapAuxView_;
 
     WGPUSampler defaultSampler_;
     WGPUSampler shadowSampler_;
@@ -66,21 +73,28 @@ private:
     WGPUComputePipeline genMipmapSRGBPipeline_;
     WGPUPipelineLayout genMipmapEnvPipelineLayout_;
     WGPUComputePipeline genMipmapEnvPipeline_;
+    WGPUPipelineLayout summedAreaShadowPipelineLayout_;
+    WGPUComputePipeline summedAreaShadowPipelineX_;
+    WGPUComputePipeline summedAreaShadowPipelineY_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
     WGPUBuffer lightsUniformBuffer_;
+    WGPUBuffer summedAreaShadowUniformBuffer_;
+
+    int summedAreaShadowSteps_;
 
     WGPUTexture stubEnvTexture_;
     WGPUTexture envTexture_;
     WGPUTextureView envTextureView_;
 
-    std::uint64_t objectUniformBufferStride_ = 256;
-
     WGPUBindGroup emptyBindGroup_;
     WGPUBindGroup cameraBindGroup_;
     WGPUBindGroup objectBindGroup_;
     WGPUBindGroup lightsBindGroup_;
+    WGPUBindGroup summedAreaShadowForwardBindGroup_;
+    WGPUBindGroup summedAreaShadowBackwardBindGroup_;
+    WGPUBindGroup summedAreaShadowUniformsBindGroup_;
 
     WGPUTexture frameTexture_;
     WGPUTextureView frameTextureView_;
@@ -92,6 +106,7 @@ private:
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
     void renderShadow(std::vector<RenderObjectPtr> const & objects);
+    void computeSummedAreaShadow();
     void renderEnv(WGPUTextureView targetView);
     void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
 
@@ -108,6 +123,7 @@ private:
 Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     : device_(device)
     , queue_(queue)
+    , uniformBufferStride_(getUniformBufferStride(device_))
     , loaderThread_([this]{ loaderThreadMain(); })
     , emptyBindGroupLayout_(createEmptyBindGroupLayout(device_))
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
@@ -116,12 +132,17 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , lightsBindGroupLayout_(createLightsBindGroupLayout(device_))
     , genMipmapBindGroupLayout_(createGenMipmapBindGroupLayout(device_))
     , genMipmapEnvBindGroupLayout_(createGenEnvMipmapBindGroupLayout(device_))
+    , summedAreaShadowTexturesBindGroupLayout_(createSummedAreaShadowTexturesBindGroupLayout(device_))
+    , summedAreaShadowUniformsBindGroupLayout_(createSummedAreaShadowUniformsBindGroupLayout(device_))
     , shaderModule_(createShaderModule(device_, mainShader))
     , genMipmapShaderModule_(createShaderModule(device_, genMipmapShader))
     , genMipmapEnvShaderModule_(createShaderModule(device_, genEnvMipmapShader))
-    , shadowMap_(createShadowMapTexture(device_, 4096))
-    , shadowMapDepth_(createShadowMapDepthTexture(device_, 4096))
+    , summedAreaShadowShaderModule_(createShaderModule(device_, summedAreaShadowShader))
+    , shadowMap_(createShadowMapTexture(device_, 1024))
+    , shadowMapDepth_(createShadowMapDepthTexture(device_, 1024))
+    , shadowMapAux_(createShadowMapTexture(device_, 1024))
     , shadowMapView_(createTextureView(shadowMap_))
+    , shadowMapAuxView_(createTextureView(shadowMapAux_))
     , shadowMapDepthView_(createTextureView(shadowMapDepth_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
@@ -137,9 +158,14 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , genMipmapSRGBPipeline_(createMipmapSRGBPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
     , genMipmapEnvPipelineLayout_(createPipelineLayout(device_, {genMipmapEnvBindGroupLayout_}))
     , genMipmapEnvPipeline_(createMipmapEnvPipeline(device_, genMipmapEnvPipelineLayout_, genMipmapEnvShaderModule_))
+    , summedAreaShadowPipelineLayout_(createPipelineLayout(device_, {summedAreaShadowTexturesBindGroupLayout_, summedAreaShadowUniformsBindGroupLayout_}))
+    , summedAreaShadowPipelineX_(createSummedAreaShadowPipelineX(device_, summedAreaShadowPipelineLayout_, summedAreaShadowShaderModule_))
+    , summedAreaShadowPipelineY_(createSummedAreaShadowPipelineY(device_, summedAreaShadowPipelineLayout_, summedAreaShadowShaderModule_))
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
+    , summedAreaShadowUniformBuffer_(createSummedAreaShadowUniformBuffer(device_, queue_, shadowMap_, uniformBufferStride_))
+    , summedAreaShadowSteps_(summedAreaShadowSteps(shadowMap_))
     , stubEnvTexture_(createStubEnvTexture(device_, queue_))
     , envTexture_(nullptr)
     , envTextureView_(createTextureView(stubEnvTexture_))
@@ -147,6 +173,9 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
     , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_))
+    , summedAreaShadowForwardBindGroup_(createSummedAreaShadowTexturesBindGroup(device_, summedAreaShadowTexturesBindGroupLayout_, shadowMapView_, shadowMapAuxView_))
+    , summedAreaShadowBackwardBindGroup_(createSummedAreaShadowTexturesBindGroup(device_, summedAreaShadowTexturesBindGroupLayout_, shadowMapAuxView_, shadowMapView_))
+    , summedAreaShadowUniformsBindGroup_(createSummedAreaUniformsBindGroup(device_, summedAreaShadowUniformsBindGroupLayout_, summedAreaShadowUniformBuffer_))
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
@@ -313,6 +342,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     updateCameraUniformBufferShadow(shadowProjection);
 
     renderShadow(objects);
+    computeSummedAreaShadow();
 
     updateCameraUniformBuffer(camera);
     updateLightsUniformBuffer(shadowProjection, lightSettings);
@@ -507,7 +537,7 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
     {
         auto const & object = objects[i];
 
-        std::uint32_t dynamicOffset = i * objectUniformBufferStride_;
+        std::uint32_t dynamicOffset = i * uniformBufferStride_;
 
         wgpuRenderPassEncoderSetBindGroup(renderPass, 1, objectBindGroup_, 1, &dynamicOffset);
         wgpuRenderPassEncoderSetBindGroup(renderPass, 2, object->texturesBindGroup, 0, nullptr);
@@ -525,6 +555,54 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
 
     wgpuCommandBufferRelease(commandBuffer);
     wgpuCommandEncoderRelease(commandEncoder);
+}
+
+void Engine::Impl::computeSummedAreaShadow()
+{
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
+
+    int const workgroupCount = wgpuTextureGetWidth(shadowMap_) / 16;
+
+    wgpuComputePassEncoderSetPipeline(computePass, summedAreaShadowPipelineX_);
+
+    bool forward = true;
+
+    for (int step = 0; step < summedAreaShadowSteps_; ++step)
+    {
+        if (forward)
+            wgpuComputePassEncoderSetBindGroup(computePass, 0, summedAreaShadowForwardBindGroup_, 0, nullptr);
+        else
+            wgpuComputePassEncoderSetBindGroup(computePass, 0, summedAreaShadowBackwardBindGroup_, 0, nullptr);
+        forward ^= true;
+
+        std::uint32_t dynamicOffset = uniformBufferStride_ * step;
+        wgpuComputePassEncoderSetBindGroup(computePass, 1, summedAreaShadowUniformsBindGroup_, 1, &dynamicOffset);
+
+        wgpuComputePassEncoderDispatchWorkgroups(computePass, workgroupCount, workgroupCount, 1);
+    }
+
+    wgpuComputePassEncoderSetPipeline(computePass, summedAreaShadowPipelineY_);
+
+    for (int step = 0; step < summedAreaShadowSteps_; ++step)
+    {
+        if (forward)
+            wgpuComputePassEncoderSetBindGroup(computePass, 0, summedAreaShadowForwardBindGroup_, 0, nullptr);
+        else
+            wgpuComputePassEncoderSetBindGroup(computePass, 0, summedAreaShadowBackwardBindGroup_, 0, nullptr);
+        forward ^= true;
+
+        std::uint32_t dynamicOffset = uniformBufferStride_ * step;
+        wgpuComputePassEncoderSetBindGroup(computePass, 1, summedAreaShadowUniformsBindGroup_, 1, &dynamicOffset);
+
+        wgpuComputePassEncoderDispatchWorkgroups(computePass, workgroupCount, workgroupCount, 1);
+    }
+
+    wgpuComputePassEncoderEnd(computePass);
+
+    WGPUCommandBuffer commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
 }
 
 void Engine::Impl::renderEnv(WGPUTextureView targetView)
@@ -562,7 +640,7 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
     {
         auto const & object = objects[i];
 
-        std::uint32_t dynamicOffset = i * objectUniformBufferStride_;
+        std::uint32_t dynamicOffset = i * uniformBufferStride_;
 
         wgpuRenderPassEncoderSetBindGroup(renderPass, 1, objectBindGroup_, 1, &dynamicOffset);
         wgpuRenderPassEncoderSetBindGroup(renderPass, 2, object->texturesBindGroup, 0, nullptr);
@@ -640,7 +718,7 @@ void Engine::Impl::updateCameraUniformBuffer(Camera const & camera)
 
 void Engine::Impl::updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects)
 {
-    if (!objectUniformBuffer_ || wgpuBufferGetSize(objectUniformBuffer_) < objects.size() * objectUniformBufferStride_)
+    if (!objectUniformBuffer_ || wgpuBufferGetSize(objectUniformBuffer_) < objects.size() * uniformBufferStride_)
     {
         if (objectUniformBuffer_)
         {
@@ -648,7 +726,7 @@ void Engine::Impl::updateObjectUniformBuffer(std::vector<RenderObjectPtr> const 
             wgpuBufferRelease(objectUniformBuffer_);
         }
 
-        objectUniformBuffer_ = createUniformBuffer(device_, objects.size() * objectUniformBufferStride_);
+        objectUniformBuffer_ = createUniformBuffer(device_, objects.size() * uniformBufferStride_);
 
         objectBindGroup_ = createObjectBindGroup(device_, objectBindGroupLayout_, objectUniformBuffer_);
 
@@ -656,9 +734,9 @@ void Engine::Impl::updateObjectUniformBuffer(std::vector<RenderObjectPtr> const 
             object->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
     }
 
-    std::vector<char> objectUniforms(objects.size() * objectUniformBufferStride_);
+    std::vector<char> objectUniforms(objects.size() * uniformBufferStride_);
     for (int i = 0; i < objects.size(); ++i)
-        std::memcpy(objectUniforms.data() + i * objectUniformBufferStride_, &objects[i]->uniforms, sizeof(objects[i]->uniforms));
+        std::memcpy(objectUniforms.data() + i * uniformBufferStride_, &objects[i]->uniforms, sizeof(objects[i]->uniforms));
 
     wgpuQueueWriteBuffer(queue_, objectUniformBuffer_, 0, objectUniforms.data(), objectUniforms.size() * sizeof(objectUniforms[0]));
 }
