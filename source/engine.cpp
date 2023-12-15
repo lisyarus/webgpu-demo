@@ -47,7 +47,9 @@ private:
     WGPUShaderModule genMipmapEnvShaderModule_;
 
     WGPUTexture shadowMap_;
+    WGPUTexture shadowMapDepth_;
     WGPUTextureView shadowMapView_;
+    WGPUTextureView shadowMapDepthView_;
 
     WGPUSampler defaultSampler_;
     WGPUSampler shadowSampler_;
@@ -118,7 +120,9 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , genMipmapShaderModule_(createShaderModule(device_, genMipmapShader))
     , genMipmapEnvShaderModule_(createShaderModule(device_, genEnvMipmapShader))
     , shadowMap_(createShadowMapTexture(device_, 4096))
+    , shadowMapDepth_(createShadowMapDepthTexture(device_, 4096))
     , shadowMapView_(createTextureView(shadowMap_))
+    , shadowMapDepthView_(createTextureView(shadowMapDepth_))
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
     , envSampler_(createEnvSampler(device_))
@@ -494,7 +498,7 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
 {
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPass = createShadowRenderPass(commandEncoder, shadowMapView_);
+    WGPURenderPassEncoder renderPass = createShadowRenderPass(commandEncoder, shadowMapView_, shadowMapDepthView_);
 
     wgpuRenderPassEncoderSetPipeline(renderPass, shadowPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);

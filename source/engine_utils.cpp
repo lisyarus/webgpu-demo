@@ -48,8 +48,8 @@ struct Lights {
 @group(2) @binding(3) var metallicRoughnessTexture: texture_2d<f32>;
 
 @group(3) @binding(0) var<uniform> lights : Lights;
-@group(3) @binding(1) var shadowSampler: sampler_comparison;
-@group(3) @binding(2) var shadowMapTexture: texture_depth_2d;
+@group(3) @binding(1) var shadowSampler: sampler;
+@group(3) @binding(2) var shadowMapTexture: texture_2d<f32>;
 @group(3) @binding(3) var envSampler: sampler;
 @group(3) @binding(4) var envMapTexture : texture_2d<f32>;
 
@@ -190,8 +190,14 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
     let shadowPositionNdc = perspectiveDivide(shadowPositionClip);
-    let shadowBias = 0.001;
-    let shadowFactor = textureSampleCompare(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5), shadowPositionNdc.z - shadowBias);
+    let shadowBias = 0.000;
+    let shadowThreshold = 0.5;
+
+    let shadowSample = textureSample(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5)).rg;
+    let sigma2 = shadowSample.g - shadowSample.r * shadowSample.r;
+    let shadowDelta = shadowPositionNdc.z - shadowSample.r - shadowBias;
+    var shadowFactor = select(sigma2 / (sigma2 + shadowDelta * shadowDelta), 1.0, shadowDelta < 0.0);
+    shadowFactor = clamp((shadowFactor - shadowThreshold) / (1.0 - shadowThreshold), 0.0, 1.0);
 
     let outColor = lights.ambientLight * baseColor + material * lightness * shadowFactor * lights.sunIntensity;
 
@@ -215,12 +221,16 @@ fn shadowVertexMain(in : ShadowVertexInput) -> ShadowVertexOutput {
 }
 
 @fragment
-fn shadowFragmentMain(in : ShadowVertexOutput) {
-    let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord);
+fn shadowFragmentMain(in : ShadowVertexOutput) -> @location(0) vec4f {
+    let baseColor = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
 
-    if (baseColorSample.a < 0.5) {
+    if (baseColor.a < 0.5) {
         discard;
     }
+
+    let d = vec2f(dpdx(in.position.z), dpdy(in.position.z));
+
+    return vec4f(in.position.z, in.position.z * in.position.z + 0.25 * dot(d, d), 0.0, 0.0);
 }
 
 struct EnvVertexInput {
@@ -547,7 +557,7 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[1].buffer.hasDynamicOffset = false;
     entries[1].buffer.minBindingSize = 0;
     entries[1].sampler.nextInChain = nullptr;
-    entries[1].sampler.type = WGPUSamplerBindingType_Comparison;
+    entries[1].sampler.type = WGPUSamplerBindingType_Filtering;
     entries[1].texture.nextInChain = nullptr;
     entries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
     entries[1].texture.multisampled = false;
@@ -567,7 +577,7 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[2].sampler.nextInChain = nullptr;
     entries[2].sampler.type = WGPUSamplerBindingType_Undefined;
     entries[2].texture.nextInChain = nullptr;
-    entries[2].texture.sampleType = WGPUTextureSampleType_Depth;
+    entries[2].texture.sampleType = WGPUTextureSampleType_Float;
     entries[2].texture.multisampled = false;
     entries[2].texture.viewDimension = WGPUTextureViewDimension_2D;
     entries[2].storageTexture.nextInChain = nullptr;
@@ -813,14 +823,20 @@ WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipe
 
 WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
 {
+    WGPUColorTargetState colorTargets[1];
+    colorTargets[0].nextInChain = nullptr;
+    colorTargets[0].format = WGPUTextureFormat_RG32Float;
+    colorTargets[0].blend = nullptr;
+    colorTargets[0].writeMask = WGPUColorWriteMask_All;
+
     WGPUFragmentState fragmentState;
     fragmentState.nextInChain = nullptr;
     fragmentState.module = shaderModule;
     fragmentState.entryPoint = "shadowFragmentMain";
     fragmentState.constantCount = 0;
     fragmentState.constants = nullptr;
-    fragmentState.targetCount = 0;
-    fragmentState.targets = nullptr;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = colorTargets;
 
     WGPUVertexAttribute attributes[2];
     attributes[0].format = WGPUVertexFormat_Float32x3;
@@ -1184,7 +1200,7 @@ WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WG
     return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
 }
 
-WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView depthTarget)
+WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget)
 {
     WGPURenderPassDepthStencilAttachment depthStencilAttachment;
     depthStencilAttachment.view = depthTarget;
@@ -1197,11 +1213,19 @@ WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, 
     depthStencilAttachment.stencilClearValue = 0;
     depthStencilAttachment.stencilReadOnly = true;
 
+    WGPURenderPassColorAttachment colorAttachments[1];
+    colorAttachments[0].nextInChain = nullptr;
+    colorAttachments[0].view = colorTarget;
+    colorAttachments[0].resolveTarget = nullptr;
+    colorAttachments[0].loadOp = WGPULoadOp_Clear;
+    colorAttachments[0].storeOp = WGPUStoreOp_Store;
+    colorAttachments[0].clearValue = {1.0, 1.0, 1.0, 1.0};
+
     WGPURenderPassDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.colorAttachmentCount = 0;
-    descriptor.colorAttachments = nullptr;
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = colorAttachments;
     descriptor.depthStencilAttachment = &depthStencilAttachment;
     descriptor.occlusionQuerySet = nullptr;
     descriptor.timestampWrites = nullptr;
@@ -1274,15 +1298,15 @@ WGPUSampler createShadowSampler(WGPUDevice device)
     WGPUSamplerDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.addressModeU = WGPUAddressMode_MirrorRepeat;
-    descriptor.addressModeV = WGPUAddressMode_MirrorRepeat;
-    descriptor.addressModeW = WGPUAddressMode_MirrorRepeat;
+    descriptor.addressModeU = WGPUAddressMode_ClampToEdge;
+    descriptor.addressModeV = WGPUAddressMode_ClampToEdge;
+    descriptor.addressModeW = WGPUAddressMode_ClampToEdge;
     descriptor.magFilter = WGPUFilterMode_Linear;
     descriptor.minFilter = WGPUFilterMode_Linear;
     descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
     descriptor.lodMinClamp = 0.f;
     descriptor.lodMaxClamp = 0.f;
-    descriptor.compare = WGPUCompareFunction_LessEqual;
+    descriptor.compare = WGPUCompareFunction_Undefined;
     descriptor.maxAnisotropy = 1;
 
     return wgpuDeviceCreateSampler(device, &descriptor);
@@ -1356,6 +1380,23 @@ WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size)
     textureDescriptor.nextInChain = nullptr;
     textureDescriptor.label = nullptr;
     textureDescriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    textureDescriptor.dimension = WGPUTextureDimension_2D;
+    textureDescriptor.size = {size, size, 1};
+    textureDescriptor.format = WGPUTextureFormat_RG32Float;
+    textureDescriptor.mipLevelCount = 1;
+    textureDescriptor.sampleCount = 1;
+    textureDescriptor.viewFormatCount = 0;
+    textureDescriptor.viewFormats = nullptr;
+
+    return wgpuDeviceCreateTexture(device, &textureDescriptor);
+}
+
+WGPUTexture createShadowMapDepthTexture(WGPUDevice device, std::uint32_t size)
+{
+    WGPUTextureDescriptor textureDescriptor;
+    textureDescriptor.nextInChain = nullptr;
+    textureDescriptor.label = nullptr;
+    textureDescriptor.usage = WGPUTextureUsage_RenderAttachment;
     textureDescriptor.dimension = WGPUTextureDimension_2D;
     textureDescriptor.size = {size, size, 1};
     textureDescriptor.format = WGPUTextureFormat_Depth24Plus;

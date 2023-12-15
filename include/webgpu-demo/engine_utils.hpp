@@ -84,7 +84,7 @@ WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFor
 WGPUCommandEncoder createCommandEncoder(WGPUDevice device);
 
 WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
-WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView depthTarget);
+WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget);
 WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget);
 WGPUComputePassEncoder createComputePass(WGPUCommandEncoder commandEncoder);
 
@@ -96,4 +96,5 @@ WGPUSampler createEnvSampler(WGPUDevice device);
 
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size);
+WGPUTexture createShadowMapDepthTexture(WGPUDevice device, std::uint32_t size);
 WGPUTexture createStubEnvTexture(WGPUDevice device, WGPUQueue queue);
