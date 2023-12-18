@@ -150,6 +150,8 @@ fn specularVHelper(halfway : vec3f, normal : vec3f, alpha2 : f32, v : vec3f) -> 
     return step(0.0, hdotv) / (abs(ndotv) + sqrt(mix(ndotv * ndotv, 1.0, alpha2)));
 }
 
+const ESM_FACTOR = 80.0;
+
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
@@ -190,14 +192,10 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
     let shadowPositionNdc = perspectiveDivide(shadowPositionClip);
-    let shadowBias = 0.000;
-    let shadowThreshold = 0.5;
+    let shadowThreshold = 0.125;
 
-    let shadowSample = textureSample(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5)).rg;
-    let sigma2 = shadowSample.g - shadowSample.r * shadowSample.r;
-    let shadowDelta = shadowPositionNdc.z - shadowSample.r - shadowBias;
-    var shadowFactor = select(sigma2 / (sigma2 + shadowDelta * shadowDelta), 1.0, shadowDelta < 0.0);
-    shadowFactor = clamp((shadowFactor - shadowThreshold) / (1.0 - shadowThreshold), 0.0, 1.0);
+    let shadowSample = textureSample(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5)).r;
+    let shadowFactor = clamp((exp(- ESM_FACTOR * shadowPositionNdc.z) * shadowSample - shadowThreshold) / (1.0 - shadowThreshold), 0.0, 1.0);
 
     let outColor = lights.ambientLight * baseColor + material * lightness * shadowFactor * lights.sunIntensity;
 
@@ -228,9 +226,7 @@ fn shadowFragmentMain(in : ShadowVertexOutput) -> @location(0) vec4f {
         discard;
     }
 
-    let d = vec2f(dpdx(in.position.z), dpdy(in.position.z));
-
-    return vec4f(in.position.z, in.position.z * in.position.z + 0.25 * dot(d, d), 0.0, 0.0);
+    return vec4f(exp(ESM_FACTOR * in.position.z), 0.0, 0.0, 0.0);
 }
 
 struct EnvVertexInput {
@@ -825,7 +821,7 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
 {
     WGPUColorTargetState colorTargets[1];
     colorTargets[0].nextInChain = nullptr;
-    colorTargets[0].format = WGPUTextureFormat_RG32Float;
+    colorTargets[0].format = WGPUTextureFormat_R32Float;
     colorTargets[0].blend = nullptr;
     colorTargets[0].writeMask = WGPUColorWriteMask_All;
 
@@ -1382,7 +1378,7 @@ WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size)
     textureDescriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
     textureDescriptor.dimension = WGPUTextureDimension_2D;
     textureDescriptor.size = {size, size, 1};
-    textureDescriptor.format = WGPUTextureFormat_RG32Float;
+    textureDescriptor.format = WGPUTextureFormat_R32Float;
     textureDescriptor.mipLevelCount = 1;
     textureDescriptor.sampleCount = 1;
     textureDescriptor.viewFormatCount = 0;
