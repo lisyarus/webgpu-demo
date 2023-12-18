@@ -49,6 +49,7 @@ glm::mat4 glToVkProjection(glm::mat4 matrix);
 extern const char mainShader[];
 extern const char genMipmapShader[];
 extern const char genEnvMipmapShader[];
+extern const char blurShadowShader[];
 
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code);
 
@@ -59,6 +60,7 @@ WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
 
@@ -68,6 +70,8 @@ WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipel
 WGPUComputePipeline createMipmapPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createBlurShadowXPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 
@@ -77,6 +81,7 @@ WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
 WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
     WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView);
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
+WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
 WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFormat format);

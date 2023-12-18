@@ -41,14 +41,18 @@ private:
     WGPUBindGroupLayout lightsBindGroupLayout_;
     WGPUBindGroupLayout genMipmapBindGroupLayout_;
     WGPUBindGroupLayout genMipmapEnvBindGroupLayout_;
+    WGPUBindGroupLayout blurShadowBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
     WGPUShaderModule genMipmapShaderModule_;
     WGPUShaderModule genMipmapEnvShaderModule_;
+    WGPUShaderModule blurShadowShaderModule_;
 
     WGPUTexture shadowMap_;
+    WGPUTexture shadowMapAux_;
     WGPUTexture shadowMapDepth_;
     WGPUTextureView shadowMapView_;
+    WGPUTextureView shadowMapAuxView_;
     WGPUTextureView shadowMapDepthView_;
 
     WGPUSampler defaultSampler_;
@@ -66,6 +70,9 @@ private:
     WGPUComputePipeline genMipmapSRGBPipeline_;
     WGPUPipelineLayout genMipmapEnvPipelineLayout_;
     WGPUComputePipeline genMipmapEnvPipeline_;
+    WGPUPipelineLayout blurShadowPipelineLayout_;
+    WGPUComputePipeline blurShadowXPipeline_;
+    WGPUComputePipeline blurShadowYPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -81,6 +88,8 @@ private:
     WGPUBindGroup cameraBindGroup_;
     WGPUBindGroup objectBindGroup_;
     WGPUBindGroup lightsBindGroup_;
+    WGPUBindGroup blurShadowXBindGroup_;
+    WGPUBindGroup blurShadowYBindGroup_;
 
     WGPUTexture frameTexture_;
     WGPUTextureView frameTextureView_;
@@ -92,6 +101,7 @@ private:
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
     void renderShadow(std::vector<RenderObjectPtr> const & objects);
+    void blurShadow();
     void renderEnv(WGPUTextureView targetView);
     void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
 
@@ -109,6 +119,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     : device_(device)
     , queue_(queue)
     , loaderThread_([this]{ loaderThreadMain(); })
+
+    // Bind group layouts
     , emptyBindGroupLayout_(createEmptyBindGroupLayout(device_))
     , cameraBindGroupLayout_(createCameraBindGroupLayout(device_))
     , objectBindGroupLayout_(createObjectBindGroupLayout(device_))
@@ -116,16 +128,28 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , lightsBindGroupLayout_(createLightsBindGroupLayout(device_))
     , genMipmapBindGroupLayout_(createGenMipmapBindGroupLayout(device_))
     , genMipmapEnvBindGroupLayout_(createGenEnvMipmapBindGroupLayout(device_))
+    , blurShadowBindGroupLayout_(createBlurShadowBindGroupLayout(device_))
+
+    // Shader modules
     , shaderModule_(createShaderModule(device_, mainShader))
     , genMipmapShaderModule_(createShaderModule(device_, genMipmapShader))
     , genMipmapEnvShaderModule_(createShaderModule(device_, genEnvMipmapShader))
+    , blurShadowShaderModule_(createShaderModule(device_, blurShadowShader))
+
+    // Shadow map textures & views
     , shadowMap_(createShadowMapTexture(device_, 2048))
+    , shadowMapAux_(createShadowMapTexture(device_, 2048))
     , shadowMapDepth_(createShadowMapDepthTexture(device_, 2048))
     , shadowMapView_(createTextureView(shadowMap_))
+    , shadowMapAuxView_(createTextureView(shadowMapAux_))
     , shadowMapDepthView_(createTextureView(shadowMapDepth_))
+
+    // Samplers
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
     , envSampler_(createEnvSampler(device_))
+
+    // Pipelines
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
     , mainPipeline_(nullptr)
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
@@ -137,20 +161,35 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , genMipmapSRGBPipeline_(createMipmapSRGBPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
     , genMipmapEnvPipelineLayout_(createPipelineLayout(device_, {genMipmapEnvBindGroupLayout_}))
     , genMipmapEnvPipeline_(createMipmapEnvPipeline(device_, genMipmapEnvPipelineLayout_, genMipmapEnvShaderModule_))
+    , blurShadowPipelineLayout_(createPipelineLayout(device_, {blurShadowBindGroupLayout_}))
+    , blurShadowXPipeline_(createBlurShadowXPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
+    , blurShadowYPipeline_(createBlurShadowYPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
+
+    // Uniform buffers
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
+
+    // Environment map textures and views
     , stubEnvTexture_(createStubEnvTexture(device_, queue_))
     , envTexture_(nullptr)
     , envTextureView_(createTextureView(stubEnvTexture_))
+
+    // Bind groups
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
     , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_))
+    , blurShadowXBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapView_, shadowMapAuxView_))
+    , blurShadowYBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapAuxView_, shadowMapView_))
+
+    // Frame textures
     , frameTexture_(nullptr)
     , frameTextureView_(nullptr)
     , depthTexture_(nullptr)
     , depthTextureView_(nullptr)
+
+    // Extra textures
     , whiteTexture_(createWhiteTexture(device_, queue_))
 {}
 
@@ -313,6 +352,8 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     updateCameraUniformBufferShadow(shadowProjection);
 
     renderShadow(objects);
+
+    blurShadow();
 
     updateCameraUniformBuffer(camera);
     updateLightsUniformBuffer(shadowProjection, lightSettings);
@@ -519,6 +560,33 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
 
     wgpuRenderPassEncoderEnd(renderPass);
     wgpuRenderPassEncoderRelease(renderPass);
+
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
+}
+
+void Engine::Impl::blurShadow()
+{
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
+
+    int const textureSize = wgpuTextureGetWidth(shadowMap_);
+    int const workgroups = textureSize / 32;
+
+    wgpuComputePassEncoderSetPipeline(computePass, blurShadowXPipeline_);
+    wgpuComputePassEncoderSetBindGroup(computePass, 0, blurShadowXBindGroup_, 0, nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(computePass, workgroups, textureSize, 1);
+
+    wgpuComputePassEncoderSetPipeline(computePass, blurShadowYPipeline_);
+    wgpuComputePassEncoderSetBindGroup(computePass, 0, blurShadowYBindGroup_, 0, nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(computePass, textureSize, workgroups, 1);
+
+    wgpuComputePassEncoderEnd(computePass);
+    wgpuComputePassEncoderRelease(computePass);
 
     auto commandBuffer = commandEncoderFinish(commandEncoder);
     wgpuQueueSubmit(queue_, 1, &commandBuffer);

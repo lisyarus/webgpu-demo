@@ -350,6 +350,41 @@ fn generateMipmapEnv(@builtin(global_invocation_id) id : vec3<u32>) {
 
 )";
 
+const char blurShadowShader[] =
+R"(
+
+@group(0) @binding(0) var input : texture_2d<f32>;
+@group(0) @binding(1) var output : texture_storage_2d<r32float, write>;
+
+const RADIUS = 7;
+const SIGMA = 5.0;
+
+fn doBlur(id : vec2u, direction : vec2i) {
+    var sum = 0.0;
+    var sumWeights = 0.0;
+    for (var i = -RADIUS; i <= RADIUS; i += 1) {
+        let weight = exp(- f32(i * i) / (SIGMA * SIGMA));
+        sum += textureLoad(input, vec2u(vec2i(id) + direction * i), 0).r * weight;
+        sumWeights += weight;
+    }
+
+    sum /= sumWeights;
+
+    textureStore(output, id, vec4f(sum, 0.0, 0.0, 0.0));
+}
+
+@compute @workgroup_size(32, 1)
+fn blurShadowX(@builtin(global_invocation_id) id : vec3u) {
+    doBlur(id.xy, vec2i(1, 0));
+}
+
+@compute @workgroup_size(1, 32)
+fn blurShadowY(@builtin(global_invocation_id) id : vec3u) {
+    doBlur(id.xy, vec2i(0, 1));
+}
+
+)";
+
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
 {
     WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;
@@ -724,6 +759,55 @@ WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Compute;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = 0;
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Compute;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[1].texture.multisampled = false;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+    entries[1].storageTexture.format = WGPUTextureFormat_R32Float;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
 {
     WGPUPipelineLayoutDescriptor descriptor;
@@ -981,6 +1065,36 @@ WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayou
     return wgpuDeviceCreateComputePipeline(device, &descriptor);
 }
 
+WGPUComputePipeline createBlurShadowXPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "blurShadowX";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "blurShadowX";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
+WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "blurShadowY";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "blurShadowY";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
 {
     WGPUBufferDescriptor descriptor;
@@ -1104,6 +1218,36 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
 }
 
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output)
+{
+    WGPUBindGroupEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].buffer = 0;
+    entries[0].offset = 0;
+    entries[0].size = 0;
+    entries[0].sampler = nullptr;
+    entries[0].textureView = input;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].buffer = 0;
+    entries[1].offset = 0;
+    entries[1].size = 0;
+    entries[1].sampler = nullptr;
+    entries[1].textureView = output;
+
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
+}
+
+WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output)
 {
     WGPUBindGroupEntry entries[2];
 
@@ -1375,7 +1519,7 @@ WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size)
     WGPUTextureDescriptor textureDescriptor;
     textureDescriptor.nextInChain = nullptr;
     textureDescriptor.label = nullptr;
-    textureDescriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    textureDescriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_StorageBinding;
     textureDescriptor.dimension = WGPUTextureDimension_2D;
     textureDescriptor.size = {size, size, 1};
     textureDescriptor.format = WGPUTextureFormat_R32Float;
