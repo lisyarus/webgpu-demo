@@ -890,7 +890,7 @@ WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipe
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
     descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
     descriptor.primitive.frontFace = WGPUFrontFace_CCW;
-    descriptor.primitive.cullMode = WGPUCullMode_None;
+    descriptor.primitive.cullMode = WGPUCullMode_Back;
     descriptor.depthStencil = &depthStencilState;
     descriptor.multisample.nextInChain = nullptr;
     descriptor.multisample.count = 4;
@@ -966,7 +966,7 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
     descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
     descriptor.primitive.frontFace = WGPUFrontFace_CCW;
-    descriptor.primitive.cullMode = WGPUCullMode_None;
+    descriptor.primitive.cullMode = WGPUCullMode_Back;
     descriptor.depthStencil = &depthStencilState;
     descriptor.multisample.nextInChain = nullptr;
     descriptor.multisample.count = 1;
