@@ -150,6 +150,20 @@ fn specularVHelper(halfway : vec3f, normal : vec3f, alpha2 : f32, v : vec3f) -> 
     return step(0.0, hdotv) / (abs(ndotv) + sqrt(mix(ndotv * ndotv, 1.0, alpha2)));
 }
 
+fn unpackShadowHelper(x : f32) -> f32 {
+//    return x;
+//    if (x < 0.0) {
+//        return x + 1024.0;
+//    } else {
+//        return x;
+//    }
+    return modf(x / 1024.0 + 2.0).fract * 1024.0;
+}
+
+fn unpackShadow(value : vec4f) -> vec2f {
+    return vec2f(unpackShadowHelper(value.x + value.z), unpackShadowHelper(value.y + value.w));
+}
+
 @fragment
 fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
@@ -201,25 +215,25 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     let C = - D - 1.0;
 
     let shadowCasterSample =
-        (
-          textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(D, D)).rg
-        + textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(C, C)).rg
-        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(D, C)).rg
-        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(C, D)).rg
+        unpackShadow(
+          textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(D, D))
+        + textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(C, C))
+        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(D, C))
+        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(C, D))
         ) / (D - C) / (D - C);
 
     // TODO: proper penumbra size calculation
-    let penumbraSize = 0.0+0.0 * 16.0 * max(0.0, shadowPositionNdc.z - shadowCasterSample.r);
+    let penumbraSize = 0.0;//8.0 * max(0.0, shadowPositionNdc.z - shadowCasterSample.r);
 
     let B = penumbraSize;
     let A =  - B - 1.0;
 
     let shadowSample =
-        (
-          textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(B, B)).rg
-        + textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(A, A)).rg
-        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(B, A)).rg
-        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(A, B)).rg
+        unpackShadow(
+          textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(B, B))
+        + textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(A, A))
+        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(B, A))
+        - textureSample(shadowMapTexture, shadowSampler, shadowTexcoord + invShadowSize * vec2f(A, B))
         ) / (B - A) / (B - A);
 
     let sigma2 = shadowSample.g - shadowSample.r * shadowSample.r;
@@ -229,6 +243,8 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let outColor = lights.ambientLight * baseColor + material * lightness * shadowFactor * lights.sunIntensity;
 
+//    return vec4f(vec3f(shadowCasterSample.r), 1.0);
+//    return vec4f(shadowSample.r, 0.0, 0.0, 1.0);
     return vec4f(tonemap(outColor), baseColorSample.a);
 }
 
@@ -386,7 +402,7 @@ const char summedAreaShadowShader[] =
 R"(
 
 @group(0) @binding(0) var input : texture_2d<f32>;
-@group(0) @binding(1) var output : texture_storage_2d<rg32float, write>;
+@group(0) @binding(1) var output : texture_storage_2d<rgba32float, write>;
 @group(1) @binding(0) var<uniform> stepSize : u32;
 
 @compute @workgroup_size(16, 16)
@@ -394,7 +410,9 @@ fn summedAreaShadowStepX(@builtin(global_invocation_id) id : vec3<u32>) {
     var value : vec4f = textureLoad(input, id.xy, 0);
 
     if ((id.x & stepSize) == stepSize) {
-        value += textureLoad(input, vec2u((id.x & (~(stepSize - 1u))) - 1u, id.y), 0);
+        let value2 = textureLoad(input, vec2u((id.x & (~(stepSize - 1u))) - 1u, id.y), 0);
+        value += value2;
+        value = modf(value / 1024.0).fract * 1024.0;
     }
 
     textureStore(output, id.xy, value);
@@ -405,7 +423,9 @@ fn summedAreaShadowStepY(@builtin(global_invocation_id) id : vec3<u32>) {
     var value : vec4f = textureLoad(input, id.xy, 0);
 
     if ((id.y & stepSize) == stepSize) {
-        value += textureLoad(input, vec2u(id.x, (id.y & (~(stepSize - 1u))) - 1u), 0);
+        let value2 = textureLoad(input, vec2u(id.x, (id.y & (~(stepSize - 1u))) - 1u), 0);
+        value += value2;
+        value = modf(value / 1024.0).fract * 1024.0;
     }
 
     textureStore(output, id.xy, value);
@@ -832,7 +852,7 @@ WGPUBindGroupLayout createSummedAreaShadowTexturesBindGroupLayout(WGPUDevice dev
     entries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
     entries[1].storageTexture.nextInChain = nullptr;
     entries[1].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
-    entries[1].storageTexture.format = WGPUTextureFormat_RG32Float;
+    entries[1].storageTexture.format = WGPUTextureFormat_RGBA32Float;
     entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
 
     WGPUBindGroupLayoutDescriptor descriptor;
@@ -972,7 +992,7 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
 {
     WGPUColorTargetState colorTargets[1];
     colorTargets[0].nextInChain = nullptr;
-    colorTargets[0].format = WGPUTextureFormat_RG32Float;
+    colorTargets[0].format = WGPUTextureFormat_RGBA32Float;
     colorTargets[0].blend = nullptr;
     colorTargets[0].writeMask = WGPUColorWriteMask_All;
 
@@ -1465,7 +1485,7 @@ WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, 
     colorAttachments[0].resolveTarget = nullptr;
     colorAttachments[0].loadOp = WGPULoadOp_Clear;
     colorAttachments[0].storeOp = WGPUStoreOp_Store;
-    colorAttachments[0].clearValue = {1.0, 1.0, 1.0, 1.0};
+    colorAttachments[0].clearValue = {1.0, 1.0, 0.0, 0.0};
 
     WGPURenderPassDescriptor descriptor;
     descriptor.nextInChain = nullptr;
@@ -1547,8 +1567,8 @@ WGPUSampler createShadowSampler(WGPUDevice device)
     descriptor.addressModeU = WGPUAddressMode_ClampToEdge;
     descriptor.addressModeV = WGPUAddressMode_ClampToEdge;
     descriptor.addressModeW = WGPUAddressMode_ClampToEdge;
-    descriptor.magFilter = WGPUFilterMode_Linear;
-    descriptor.minFilter = WGPUFilterMode_Linear;
+    descriptor.magFilter = WGPUFilterMode_Nearest;
+    descriptor.minFilter = WGPUFilterMode_Nearest;
     descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
     descriptor.lodMinClamp = 0.f;
     descriptor.lodMaxClamp = 0.f;
@@ -1628,7 +1648,7 @@ WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size)
     textureDescriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_StorageBinding;
     textureDescriptor.dimension = WGPUTextureDimension_2D;
     textureDescriptor.size = {size, size, 1};
-    textureDescriptor.format = WGPUTextureFormat_RG32Float;
+    textureDescriptor.format = WGPUTextureFormat_RGBA32Float;
     textureDescriptor.mipLevelCount = 1;
     textureDescriptor.sampleCount = 1;
     textureDescriptor.viewFormatCount = 0;
