@@ -45,6 +45,8 @@ struct LightsUniform
     float envIntensity;
 };
 
+static constexpr std::size_t CLOTH_EDGES_PER_VERTEX = 8;
+
 glm::mat4 glToVkProjection(glm::mat4 matrix);
 
 extern const char mainShader[];

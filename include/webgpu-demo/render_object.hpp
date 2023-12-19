@@ -17,6 +17,7 @@ struct RenderObjectCommon
 {
     WGPUBuffer vertexBuffer;
     WGPUBuffer indexBuffer;
+    WGPUBuffer clothEdgesBuffer;
 
     WGPUTexture whiteTexture;
 
@@ -51,6 +52,13 @@ struct RenderObject
 
     BufferData vertices;
     BufferData indices;
+
+    struct ClothData
+    {
+        BufferData edges;
+    };
+
+    std::optional<ClothData> cloth;
 
     WGPUIndexFormat indexFormat;
 

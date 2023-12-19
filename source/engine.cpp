@@ -399,6 +399,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
         std::vector<Vertex> vertices;
         std::vector<std::uint16_t> indices;
+        std::vector<std::uint16_t> clothEdges;
 
         for (auto const & node : asset.nodes)
         {
@@ -506,6 +507,49 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 for (int i = 0; i < indexAccessor.count; ++i)
                     indices.emplace_back(*indexIterator++);
 
+                if (materialIn.cloth)
+                {
+                    renderObject->cloth.emplace();
+
+                    renderObject->cloth->edges.byteOffset = clothEdges.size() * sizeof(clothEdges[0]);
+                    renderObject->cloth->edges.count = renderObject->vertices.count * CLOTH_EDGES_PER_VERTEX;
+                    renderObject->cloth->edges.byteLength = renderObject->cloth->edges.count * sizeof(clothEdges[0]);
+
+                    std::vector<std::vector<std::uint16_t>> edges(renderObject->vertices.count);
+                    for (int i = 0; i < indexAccessor.count; i += 3)
+                    {
+                        auto base = renderObject->indices.byteOffset / sizeof(indices[0]);
+                        auto i0 = indices[base + i + 0];
+                        auto i1 = indices[base + i + 1];
+                        auto i2 = indices[base + i + 2];
+
+                        edges[i0].push_back(i1);
+                        edges[i0].push_back(i2);
+                        edges[i1].push_back(i0);
+                        edges[i1].push_back(i2);
+                        edges[i2].push_back(i0);
+                        edges[i2].push_back(i1);
+                    }
+
+                    for (auto & vertexEdges : edges)
+                    {
+                        std::sort(vertexEdges.begin(), vertexEdges.end());
+                        vertexEdges.erase(std::unique(vertexEdges.begin(), vertexEdges.end()), vertexEdges.end());
+
+                        if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
+                        {
+                            vertexEdges.resize(CLOTH_EDGES_PER_VERTEX);
+                        }
+                        else while (vertexEdges.size() < CLOTH_EDGES_PER_VERTEX)
+                        {
+                            vertexEdges.push_back(-1);
+                        }
+
+                        for (auto e : vertexEdges)
+                            clothEdges.push_back(e);
+                    }
+                }
+
                 renderObject->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
             }
         }
@@ -535,6 +579,17 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
         common->indexBuffer = wgpuDeviceCreateBuffer(device_, &indexBufferDescriptor);
 
         wgpuQueueWriteBuffer(queue_, common->indexBuffer, 0, indices.data(), indices.size() * sizeof(indices[0]));
+
+        WGPUBufferDescriptor clothEdgesBufferDescriptor;
+        clothEdgesBufferDescriptor.nextInChain = nullptr;
+        clothEdgesBufferDescriptor.label = nullptr;
+        clothEdgesBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Storage;
+        clothEdgesBufferDescriptor.size = clothEdges.size() * sizeof(clothEdges[0]);
+        clothEdgesBufferDescriptor.mappedAtCreation = false;
+
+        common->clothEdgesBuffer = wgpuDeviceCreateBuffer(device_, &clothEdgesBufferDescriptor);
+
+        wgpuQueueWriteBuffer(queue_, common->clothEdgesBuffer, 0, clothEdges.data(), clothEdges.size() * sizeof(clothEdges[0]));
     }
 
     for (std::uint32_t i = 0; i < common->textures.size(); ++i)
