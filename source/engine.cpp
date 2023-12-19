@@ -447,12 +447,12 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
                 renderObject->common = common;
 
-                renderObject->vertexByteOffset = vertices.size() * sizeof(vertices[0]);
-                renderObject->vertexByteLength = positionAccessor.count * sizeof(vertices[0]);
-                renderObject->vertexCount = positionAccessor.count;
-                renderObject->indexByteOffset = indices.size() * sizeof(indices[0]);
-                renderObject->indexByteLength = indexAccessor.count * sizeof(indices[0]);
-                renderObject->indexCount = indexAccessor.count;
+                renderObject->vertices.byteOffset = vertices.size() * sizeof(vertices[0]);
+                renderObject->vertices.byteLength = positionAccessor.count * sizeof(vertices[0]);
+                renderObject->vertices.count = positionAccessor.count;
+                renderObject->indices.byteOffset = indices.size() * sizeof(indices[0]);
+                renderObject->indices.byteLength = indexAccessor.count * sizeof(indices[0]);
+                renderObject->indices.count = indexAccessor.count;
                 renderObject->indexFormat = WGPUIndexFormat_Uint16;
 
                 renderObject->uniforms.modelMatrix = nodeModelMatrix;
@@ -560,9 +560,9 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
         wgpuRenderPassEncoderSetBindGroup(renderPass, 1, objectBindGroup_, 1, &dynamicOffset);
         wgpuRenderPassEncoderSetBindGroup(renderPass, 2, object->texturesBindGroup, 0, nullptr);
 
-        wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
-        wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
-        wgpuRenderPassEncoderDrawIndexed(renderPass, object->indexCount, 1, 0, 0, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, object->common->vertexBuffer, object->vertices.byteOffset, object->vertices.byteLength);
+        wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indices.byteOffset, object->indices.byteLength);
+        wgpuRenderPassEncoderDrawIndexed(renderPass, object->indices.count, 1, 0, 0, 0);
     }
 
     wgpuRenderPassEncoderEnd(renderPass);
@@ -642,9 +642,9 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
         wgpuRenderPassEncoderSetBindGroup(renderPass, 1, objectBindGroup_, 1, &dynamicOffset);
         wgpuRenderPassEncoderSetBindGroup(renderPass, 2, object->texturesBindGroup, 0, nullptr);
 
-        wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, object->common->vertexBuffer, object->vertexByteOffset, object->vertexByteLength);
-        wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indexByteOffset, object->indexByteLength);
-        wgpuRenderPassEncoderDrawIndexed(renderPass, object->indexCount, 1, 0, 0, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, object->common->vertexBuffer, object->vertices.byteOffset, object->vertices.byteLength);
+        wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indices.byteOffset, object->indices.byteLength);
+        wgpuRenderPassEncoderDrawIndexed(renderPass, object->indices.count, 1, 0, 0, 0);
     }
 
     wgpuRenderPassEncoderEnd(renderPass);

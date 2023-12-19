@@ -42,13 +42,15 @@ struct RenderObject
 {
     std::shared_ptr<RenderObjectCommon> common;
 
-    std::uint32_t vertexByteOffset;
-    std::uint32_t vertexByteLength;
-    std::uint32_t vertexCount;
+    struct BufferData
+    {
+        std::uint32_t byteOffset;
+        std::uint32_t byteLength;
+        std::uint32_t count;
+    };
 
-    std::uint32_t indexByteOffset;
-    std::uint32_t indexByteLength;
-    std::uint32_t indexCount;
+    BufferData vertices;
+    BufferData indices;
 
     WGPUIndexFormat indexFormat;
 
