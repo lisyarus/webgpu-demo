@@ -562,14 +562,27 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         edges[i2].push_back(i1);
                     }
 
-                    float topY = -std::numeric_limits<float>::infinity();
+                    for (auto & vertexEdges : edges)
+                    {
+                        std::sort(vertexEdges.begin(), vertexEdges.end());
+                        vertexEdges.erase(std::unique(vertexEdges.begin(), vertexEdges.end()), vertexEdges.end());
+                    }
+
+                    std::vector<bool> disconnected(edges.size(), false);
 
                     for (int i = 0; i < edges.size(); ++i)
                     {
                         auto & vertexEdges = edges[i];
 
-                        std::sort(vertexEdges.begin(), vertexEdges.end());
-                        vertexEdges.erase(std::unique(vertexEdges.begin(), vertexEdges.end()), vertexEdges.end());
+                        if (vertexEdges.size() == 2 && edges[vertexEdges[0]].size() == 2 && edges[vertexEdges[1]].size() == 2)
+                            disconnected[i] = true;
+                    }
+
+                    float topY = -std::numeric_limits<float>::infinity();
+
+                    for (int i = 0; i < edges.size(); ++i)
+                    {
+                        auto & vertexEdges = edges[i];
 
                         bool isTopVertex = true;
                         for (auto e : vertexEdges)
@@ -581,13 +594,17 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                             }
                         }
 
-                        if (isTopVertex)
+                        if (disconnected[i])
+                        {
+                            vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
+                            vertices[baseVertex + i].position = {0.f, 0.f, 0.f};
+                        }
+                        else if (isTopVertex)
                         {
                             vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
                             topY = std::max(topY, vertices[baseVertex + i].position.y);
                         }
-
-                        if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
+                        else if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
                         {
                             std::cout << "WARNING: " << vertexEdges.size() << " cloth edges is clamped to " << CLOTH_EDGES_PER_VERTEX;
                             vertexEdges.resize(CLOTH_EDGES_PER_VERTEX);
