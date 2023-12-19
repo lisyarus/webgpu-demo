@@ -7275,6 +7275,9 @@
       },
       "normalTexture": {
         "index": 48
+      },
+      "extras": {
+	"cloth" : true
       }
     },
     {
@@ -7294,6 +7297,9 @@
       },
       "normalTexture": {
         "index": 51
+      },
+      "extras" : {
+	"cloth": true
       }
     },
     {
@@ -7313,6 +7319,9 @@
       },
       "normalTexture": {
         "index": 53
+      },
+      "extras": {
+	"cloth": true
       }
     },
     {

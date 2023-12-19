@@ -112,6 +112,7 @@ namespace glTF
             material.metallicFactor = 1.f;
             material.roughnessFactor = 1.f;
             material.emissiveFactor = glm::vec3(0.f);
+            material.cloth = false;
 
             if (materialIn.HasMember("pbrMetallicRoughness"))
             {
@@ -129,6 +130,14 @@ namespace glTF
 
             if (materialIn.HasMember("occlusionTexture"))
                 material.occlusionTexture = materialIn["occlusionTexture"]["index"].GetUint();
+
+            if (materialIn.HasMember("extras"))
+            {
+                auto const & extras = materialIn["extras"];
+
+                if (extras.HasMember("cloth") && extras["cloth"].IsBool())
+                    material.cloth = extras["cloth"].GetBool();
+            }
         }
 
         if (document.HasMember("images"))
