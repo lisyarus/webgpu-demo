@@ -494,6 +494,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         *  normalIterator++,
                         * tangentIterator++,
                         *texcoordIterator++,
+                        glm::vec4(0.f, 0.f, 0.f, 1.f)
                     });
 
                     auto transformedVertex = glm::vec3((renderObject->uniforms.modelMatrix * glm::vec4(vertices.back().position, 1.f)));

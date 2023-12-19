@@ -12,6 +12,7 @@ struct Vertex
     glm::vec3 normal;
     glm::vec4 tangent;
     glm::vec2 texcoord;
+    glm::vec4 rotation;
 };
 
 struct CameraUniform

@@ -59,6 +59,7 @@ struct VertexInput {
     @location(1) normal : vec3f,
     @location(2) tangent: vec4f,
     @location(3) texcoord : vec2f,
+    @location(4) rotation : vec4f,
 }
 
 struct VertexOutput {
@@ -73,12 +74,20 @@ fn asMat3x3(m : mat4x4f) -> mat3x3f {
     return mat3x3f(m[0].xyz, m[1].xyz, m[2].xyz);
 }
 
+fn quatMult(q1 : vec4f, q2 : vec4f) -> vec4f {
+    return vec4f(q1.w * q2.xyz + q2.w * q1.xyz + cross(q1.xyz, q2.xyz), q1.w * q2.w - dot(q1.xyz, q2.xyz));
+}
+
+fn quatRotate(q : vec4f, v : vec3f) -> vec3f {
+    return quatMult(quatMult(q, vec4f(v, 0.0)), vec4f(-q.xyz, q.w)).xyz;
+}
+
 @vertex
 fn vertexMain(in : VertexInput) -> VertexOutput {
     let worldPosition = (object.model * vec4f(in.position, 1.0)).xyz;
     let position : vec4f = camera.viewProjection * vec4f(worldPosition, 1.0);
-    let normal : vec3f = normalize(asMat3x3(object.model) * in.normal);
-    let tangent : vec4f = vec4f(normalize(asMat3x3(object.model) * in.tangent.xyz), in.tangent.w);
+    let normal : vec3f = normalize(asMat3x3(object.model) * quatRotate(in.rotation, in.normal));
+    let tangent : vec4f = vec4f(normalize(asMat3x3(object.model) * quatRotate(in.rotation, in.tangent.xyz)), in.tangent.w);
     return VertexOutput(position, worldPosition, normal, tangent, in.texcoord);
 }
 
@@ -836,7 +845,7 @@ WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipe
     fragmentState.targetCount = 1;
     fragmentState.targets = &colorTargetState;
 
-    WGPUVertexAttribute attributes[4];
+    WGPUVertexAttribute attributes[5];
     attributes[0].format = WGPUVertexFormat_Float32x3;
     attributes[0].offset = 0;
     attributes[0].shaderLocation = 0;
@@ -849,11 +858,14 @@ WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipe
     attributes[3].format = WGPUVertexFormat_Float32x2;
     attributes[3].offset = 40;
     attributes[3].shaderLocation = 3;
+    attributes[4].format = WGPUVertexFormat_Float32x4;
+    attributes[4].offset = 48;
+    attributes[4].shaderLocation = 4;
 
     WGPUVertexBufferLayout vertexBufferLayout;
     vertexBufferLayout.arrayStride = sizeof(Vertex);
     vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
-    vertexBufferLayout.attributeCount = 4;
+    vertexBufferLayout.attributeCount = 5;
     vertexBufferLayout.attributes = attributes;
 
     WGPUDepthStencilState depthStencilState;
