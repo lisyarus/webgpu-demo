@@ -404,7 +404,7 @@ struct Vertex {
 
 struct ClothVertex {
     velocity : vec3f,
-    padding : f32,
+    newPosition : vec3f,
 }
 
 struct ClothEdge {
@@ -418,10 +418,10 @@ struct ClothEdge {
 
 const CLOTH_EDGES_PER_VERTEX = 8u;
 const DT = 0.01;
-const SPRING_FORCE = 100.0;
+const SPRING_FORCE = 200.0;
 const MASS = 1.0;
 const GRAVITY = 10.0;
-const DAMPING = 0.1;
+const DAMPING = 0.05;
 
 fn getPosition(id : u32) -> vec3f {
     return vec3f(vertices[id].data[0], vertices[id].data[1], vertices[id].data[2]);
@@ -460,9 +460,12 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
     clothVertices[id.x].velocity = newVelocity;
 
-    let newPosition = currentPosition + newVelocity * DT;
+    clothVertices[id.x].newPosition = currentPosition + newVelocity * DT;
+}
 
-    setPosition(id.x, newPosition);
+@compute @workgroup_size(1)
+fn simulateClothCopy(@builtin(global_invocation_id) id : vec3u) {
+    setPosition(id.x, clothVertices[id.x].newPosition);
 }
 
 )";
@@ -1256,6 +1259,21 @@ WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineL
     descriptor.compute.nextInChain = nullptr;
     descriptor.compute.module = shaderModule;
     descriptor.compute.entryPoint = "simulateCloth";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
+WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "simulateClothCopy";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "simulateClothCopy";
     descriptor.compute.constantCount = 0;
     descriptor.compute.constants = nullptr;
 

@@ -18,7 +18,9 @@ struct Vertex
 struct ClothVertex
 {
     glm::vec3 velocity;
-    float padding;
+    float padding1[1];
+    glm::vec3 newPosition;
+    float padding2[2];
 };
 
 struct ClothEdge
@@ -90,6 +92,7 @@ WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayou
 WGPUComputePipeline createBlurShadowXPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 

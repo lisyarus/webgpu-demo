@@ -78,6 +78,7 @@ private:
     WGPUComputePipeline blurShadowYPipeline_;
     WGPUPipelineLayout simulateClothPipelineLayout_;
     WGPUComputePipeline simulateClothPipeline_;
+    WGPUComputePipeline simulateClothCopyPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -174,6 +175,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , blurShadowYPipeline_(createBlurShadowYPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
     , simulateClothPipelineLayout_(createPipelineLayout(device_, {simulateClothBindGroupLayout_}))
     , simulateClothPipeline_(createSimulateClothPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
+    , simulateClothCopyPipeline_(createSimulateClothCopyPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
 
     // Uniform buffers
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
@@ -584,8 +586,10 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                             vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
                             topY = std::max(topY, vertices[baseVertex + i].position.y);
                         }
-                        else if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
+
+                        if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
                         {
+                            std::cout << "WARNING: " << vertexEdges.size() << " cloth edges is clamped to " << CLOTH_EDGES_PER_VERTEX;
                             vertexEdges.resize(CLOTH_EDGES_PER_VERTEX);
                         }
                         else while (vertexEdges.size() < CLOTH_EDGES_PER_VERTEX)
@@ -682,14 +686,19 @@ void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, i
 
     WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
 
-    wgpuComputePassEncoderSetPipeline(computePass, simulateClothPipeline_);
     for (auto const & object : objects)
     {
         if (!object->cloth) continue;
 
         wgpuComputePassEncoderSetBindGroup(computePass, 0, object->clothBindGroup, 0, nullptr);
         for (int i = 0; i < iterations; ++i)
+        {
+            wgpuComputePassEncoderSetPipeline(computePass, simulateClothPipeline_);
             wgpuComputePassEncoderDispatchWorkgroups(computePass, object->vertices.count / 1, 1, 1);
+
+            wgpuComputePassEncoderSetPipeline(computePass, simulateClothCopyPipeline_);
+            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->vertices.count / 1, 1, 1);
+        }
     }
 
     wgpuComputePassEncoderEnd(computePass);
