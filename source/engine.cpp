@@ -694,10 +694,10 @@ void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, i
         for (int i = 0; i < iterations; ++i)
         {
             wgpuComputePassEncoderSetPipeline(computePass, simulateClothPipeline_);
-            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->vertices.count / 1, 1, 1);
+            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->cloth->vertices.count / 32, 1, 1);
 
             wgpuComputePassEncoderSetPipeline(computePass, simulateClothCopyPipeline_);
-            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->vertices.count / 1, 1, 1);
+            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->cloth->vertices.count / 32, 1, 1);
         }
     }
 

@@ -433,7 +433,7 @@ fn setPosition(id : u32, value : vec3f) {
     vertices[id].data[2] = value.z;
 }
 
-@compute @workgroup_size(1)
+@compute @workgroup_size(32)
 fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     let currentPosition = getPosition(id.x);
 
@@ -463,7 +463,7 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     clothVertices[id.x].newPosition = currentPosition + newVelocity * DT;
 }
 
-@compute @workgroup_size(1)
+@compute @workgroup_size(32)
 fn simulateClothCopy(@builtin(global_invocation_id) id : vec3u) {
     setPosition(id.x, clothVertices[id.x].newPosition);
 }
