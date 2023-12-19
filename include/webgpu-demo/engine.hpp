@@ -33,6 +33,7 @@ struct Engine
         float envIntensity;
         glm::vec3 sunDirection;
         glm::vec3 sunIntensity;
+        bool paused;
     };
 
     void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings);

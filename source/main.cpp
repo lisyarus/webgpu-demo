@@ -132,6 +132,8 @@ int main()
             };
         }
 
+        lightSettings.paused = paused;
+
         engine.render(surfaceTexture, renderObjects, camera, sceneBbox, lightSettings);
 
         application.present();

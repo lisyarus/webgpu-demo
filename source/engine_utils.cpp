@@ -394,6 +394,79 @@ fn blurShadowY(@builtin(global_invocation_id) id : vec3u) {
 
 )";
 
+const char simulateClothShader[] =
+R"(
+
+struct Vertex {
+    // Bypass alignment issues
+    data : array<f32, 16>,
+}
+
+struct ClothVertex {
+    velocity : vec3f,
+    padding : f32,
+}
+
+struct ClothEdge {
+    id : u32,
+    length : f32,
+}
+
+@group(0) @binding(0) var<storage, read_write> vertices : array<Vertex>;
+@group(0) @binding(1) var<storage, read_write> clothVertices : array<ClothVertex>;
+@group(0) @binding(2) var<storage, read> clothEdges : array<ClothEdge>;
+
+const CLOTH_EDGES_PER_VERTEX = 8u;
+const DT = 0.01;
+const SPRING_FORCE = 100.0;
+const MASS = 1.0;
+const GRAVITY = 10.0;
+const DAMPING = 0.1;
+
+fn getPosition(id : u32) -> vec3f {
+    return vec3f(vertices[id].data[0], vertices[id].data[1], vertices[id].data[2]);
+}
+
+fn setPosition(id : u32, value : vec3f) {
+    vertices[id].data[0] = value.x;
+    vertices[id].data[1] = value.y;
+    vertices[id].data[2] = value.z;
+}
+
+@compute @workgroup_size(1)
+fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
+    let currentPosition = getPosition(id.x);
+
+    var force = vec3f(0.0);
+    var noEdges = true;
+    for (var i = 0u; i < CLOTH_EDGES_PER_VERTEX; i += 1u) {
+        let edge = clothEdges[id.x * CLOTH_EDGES_PER_VERTEX + i];
+        if (edge.id != 0xffffffffu) {
+            let delta = getPosition(edge.id) - currentPosition;
+            let distance = length(delta);
+            force += delta * (SPRING_FORCE * (distance - edge.length) / distance);
+
+            noEdges = false;
+        }
+    }
+
+    if (!noEdges) {
+        force += vec3f(0.0, -GRAVITY, 0.0);
+    }
+
+    let currentVelocity = clothVertices[id.x].velocity;
+
+    let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
+
+    clothVertices[id.x].velocity = newVelocity;
+
+    let newPosition = currentPosition + newVelocity * DT;
+
+    setPosition(id.x, newPosition);
+}
+
+)";
+
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
 {
     WGPUShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor;
@@ -817,6 +890,73 @@ WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[3];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Compute;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Storage;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = 0;
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Compute;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Storage;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[1].texture.multisampled = false;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[1].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Compute;
+    entries[2].buffer.nextInChain = nullptr;
+    entries[2].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+    entries[2].buffer.hasDynamicOffset = false;
+    entries[2].buffer.minBindingSize = 0;
+    entries[2].sampler.nextInChain = nullptr;
+    entries[2].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[2].texture.nextInChain = nullptr;
+    entries[2].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[2].texture.multisampled = false;
+    entries[2].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[2].storageTexture.nextInChain = nullptr;
+    entries[2].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[2].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 3;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
 {
     WGPUPipelineLayoutDescriptor descriptor;
@@ -1101,6 +1241,21 @@ WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLay
     descriptor.compute.nextInChain = nullptr;
     descriptor.compute.module = shaderModule;
     descriptor.compute.entryPoint = "blurShadowY";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
+WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "simulateCloth";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "simulateCloth";
     descriptor.compute.constantCount = 0;
     descriptor.compute.constants = nullptr;
 

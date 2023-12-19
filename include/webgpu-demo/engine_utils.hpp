@@ -15,6 +15,18 @@ struct Vertex
     glm::vec4 rotation;
 };
 
+struct ClothVertex
+{
+    glm::vec3 velocity;
+    float padding;
+};
+
+struct ClothEdge
+{
+    std::uint32_t id;
+    float length;
+};
+
 struct CameraUniform
 {
     glm::mat4 viewProjection;
@@ -53,6 +65,7 @@ extern const char mainShader[];
 extern const char genMipmapShader[];
 extern const char genEnvMipmapShader[];
 extern const char blurShadowShader[];
+extern const char simulateClothShader[];
 
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code);
 
@@ -64,6 +77,7 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
 
@@ -75,6 +89,7 @@ WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayo
 WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createBlurShadowXPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 

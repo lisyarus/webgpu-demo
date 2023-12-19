@@ -18,6 +18,7 @@ struct RenderObjectCommon
     WGPUBuffer vertexBuffer;
     WGPUBuffer indexBuffer;
     WGPUBuffer clothEdgesBuffer;
+    WGPUBuffer clothVertexBuffer;
 
     WGPUTexture whiteTexture;
 
@@ -56,6 +57,7 @@ struct RenderObject
     struct ClothData
     {
         BufferData edges;
+        BufferData vertices;
     };
 
     std::optional<ClothData> cloth;
@@ -76,8 +78,10 @@ struct RenderObject
     Textures textures;
 
     WGPUBindGroup texturesBindGroup = nullptr;
+    WGPUBindGroup clothBindGroup = nullptr;
 
     void createTexturesBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUSampler sampler);
+    void createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout layout);
 
     ~RenderObject();
 };

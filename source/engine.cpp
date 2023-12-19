@@ -14,6 +14,7 @@
 #include <thread>
 #include <functional>
 #include <cstring>
+#include <iostream>
 
 struct Engine::Impl
 {
@@ -42,11 +43,13 @@ private:
     WGPUBindGroupLayout genMipmapBindGroupLayout_;
     WGPUBindGroupLayout genMipmapEnvBindGroupLayout_;
     WGPUBindGroupLayout blurShadowBindGroupLayout_;
+    WGPUBindGroupLayout simulateClothBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
     WGPUShaderModule genMipmapShaderModule_;
     WGPUShaderModule genMipmapEnvShaderModule_;
     WGPUShaderModule blurShadowShaderModule_;
+    WGPUShaderModule simulateClothShaderModule_;
 
     WGPUTexture shadowMap_;
     WGPUTexture shadowMapAux_;
@@ -73,6 +76,8 @@ private:
     WGPUPipelineLayout blurShadowPipelineLayout_;
     WGPUComputePipeline blurShadowXPipeline_;
     WGPUComputePipeline blurShadowYPipeline_;
+    WGPUPipelineLayout simulateClothPipelineLayout_;
+    WGPUComputePipeline simulateClothPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -100,6 +105,7 @@ private:
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
+    void simulateCloth(std::vector<RenderObjectPtr> const & objects, int iterations);
     void renderShadow(std::vector<RenderObjectPtr> const & objects);
     void blurShadow();
     void renderEnv(WGPUTextureView targetView);
@@ -129,12 +135,14 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , genMipmapBindGroupLayout_(createGenMipmapBindGroupLayout(device_))
     , genMipmapEnvBindGroupLayout_(createGenEnvMipmapBindGroupLayout(device_))
     , blurShadowBindGroupLayout_(createBlurShadowBindGroupLayout(device_))
+    , simulateClothBindGroupLayout_(createSimulateClothBindGroupLayout(device_))
 
     // Shader modules
     , shaderModule_(createShaderModule(device_, mainShader))
     , genMipmapShaderModule_(createShaderModule(device_, genMipmapShader))
     , genMipmapEnvShaderModule_(createShaderModule(device_, genEnvMipmapShader))
     , blurShadowShaderModule_(createShaderModule(device_, blurShadowShader))
+    , simulateClothShaderModule_(createShaderModule(device_, simulateClothShader))
 
     // Shadow map textures & views
     , shadowMap_(createShadowMapTexture(device_, 2048))
@@ -164,6 +172,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , blurShadowPipelineLayout_(createPipelineLayout(device_, {blurShadowBindGroupLayout_}))
     , blurShadowXPipeline_(createBlurShadowXPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
     , blurShadowYPipeline_(createBlurShadowYPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
+    , simulateClothPipelineLayout_(createPipelineLayout(device_, {simulateClothBindGroupLayout_}))
+    , simulateClothPipeline_(createSimulateClothPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
 
     // Uniform buffers
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
@@ -352,12 +362,14 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     updateObjectUniformBuffer(objects);
 
+    if (!lightSettings.paused)
+        simulateCloth(objects, 16);
+
     WGPUTextureView targetView = createTextureView(target);
 
     glm::mat4 shadowProjection = computeShadowProjection(lightSettings.sunDirection, sceneBbox);
 
     updateCameraUniformBufferShadow(shadowProjection);
-
     renderShadow(objects);
 
     blurShadow();
@@ -399,7 +411,8 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
         std::vector<Vertex> vertices;
         std::vector<std::uint16_t> indices;
-        std::vector<std::uint16_t> clothEdges;
+        std::vector<ClothVertex> clothVertices;
+        std::vector<ClothEdge> clothEdges;
 
         for (auto const & node : asset.nodes)
         {
@@ -509,19 +522,35 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
                 if (materialIn.cloth)
                 {
+                    // Make sure vertex count for cloth simulation is a multiple of workgroup size
+                    int const vertexCountExtra = (32 - (renderObject->vertices.count % 32)) % 32;
+                    int const vertexCount = renderObject->vertices.count + vertexCountExtra;
+
+                    for (int i = 0; i < vertexCountExtra; ++i)
+                        vertices.push_back({});
+
                     renderObject->cloth.emplace();
 
                     renderObject->cloth->edges.byteOffset = clothEdges.size() * sizeof(clothEdges[0]);
-                    renderObject->cloth->edges.count = renderObject->vertices.count * CLOTH_EDGES_PER_VERTEX;
+                    renderObject->cloth->edges.count = vertexCount * CLOTH_EDGES_PER_VERTEX;
                     renderObject->cloth->edges.byteLength = renderObject->cloth->edges.count * sizeof(clothEdges[0]);
 
-                    std::vector<std::vector<std::uint16_t>> edges(renderObject->vertices.count);
+                    renderObject->cloth->vertices.byteOffset = clothVertices.size() * sizeof(clothVertices[0]);
+                    renderObject->cloth->vertices.count = vertexCount;
+                    renderObject->cloth->vertices.byteLength = renderObject->cloth->vertices.count * sizeof(clothVertices[0]);
+
+                    for (int i = 0; i < vertexCount; ++i)
+                        clothVertices.push_back({glm::vec3(0.f)});
+
+                    auto baseVertex = renderObject->vertices.byteOffset / sizeof(vertices[0]);
+                    auto baseIndex = renderObject->indices.byteOffset / sizeof(indices[0]);
+
+                    std::vector<std::vector<std::uint32_t>> edges(vertexCount);
                     for (int i = 0; i < indexAccessor.count; i += 3)
                     {
-                        auto base = renderObject->indices.byteOffset / sizeof(indices[0]);
-                        auto i0 = indices[base + i + 0];
-                        auto i1 = indices[base + i + 1];
-                        auto i2 = indices[base + i + 2];
+                        auto i0 = indices[baseIndex + i + 0];
+                        auto i1 = indices[baseIndex + i + 1];
+                        auto i2 = indices[baseIndex + i + 2];
 
                         edges[i0].push_back(i1);
                         edges[i0].push_back(i2);
@@ -531,12 +560,31 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         edges[i2].push_back(i1);
                     }
 
-                    for (auto & vertexEdges : edges)
+                    float topY = -std::numeric_limits<float>::infinity();
+
+                    for (int i = 0; i < edges.size(); ++i)
                     {
+                        auto & vertexEdges = edges[i];
+
                         std::sort(vertexEdges.begin(), vertexEdges.end());
                         vertexEdges.erase(std::unique(vertexEdges.begin(), vertexEdges.end()), vertexEdges.end());
 
-                        if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
+                        bool isTopVertex = true;
+                        for (auto e : vertexEdges)
+                        {
+                            if (vertices[baseVertex + i].position.y < vertices[baseVertex + e].position.y)
+                            {
+                                isTopVertex = false;
+                                break;
+                            }
+                        }
+
+                        if (isTopVertex)
+                        {
+                            vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
+                            topY = std::max(topY, vertices[baseVertex + i].position.y);
+                        }
+                        else if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
                         {
                             vertexEdges.resize(CLOTH_EDGES_PER_VERTEX);
                         }
@@ -546,7 +594,22 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         }
 
                         for (auto e : vertexEdges)
-                            clothEdges.push_back(e);
+                        {
+                            ClothEdge edge;
+                            edge.id = e;
+                            edge.length = 0.f;
+                            if (e != std::uint32_t(-1))
+                                edge.length = glm::distance(vertices[baseVertex + i].position, vertices[baseVertex + e].position);
+                            clothEdges.push_back(edge);
+                        }
+                    }
+
+                    for (int i = 0; i < renderObject->vertices.count; ++i)
+                    {
+                        auto & position = vertices[baseVertex + i].position;
+                        float distance = topY - position.y;
+                        position.y = topY;
+                        position.z += distance * (position.z < 0.f ? 1.f : -1.f);
                     }
                 }
 
@@ -561,7 +624,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
         WGPUBufferDescriptor vertexBufferDescriptor;
         vertexBufferDescriptor.nextInChain = nullptr;
         vertexBufferDescriptor.label = nullptr;
-        vertexBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+        vertexBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex | WGPUBufferUsage_Storage;
         vertexBufferDescriptor.size = vertices.size() * sizeof(vertices[0]);
         vertexBufferDescriptor.mappedAtCreation = false;
 
@@ -580,6 +643,17 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
         wgpuQueueWriteBuffer(queue_, common->indexBuffer, 0, indices.data(), indices.size() * sizeof(indices[0]));
 
+        WGPUBufferDescriptor clothVerticesBufferDescriptor;
+        clothVerticesBufferDescriptor.nextInChain = nullptr;
+        clothVerticesBufferDescriptor.label = nullptr;
+        clothVerticesBufferDescriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Storage;
+        clothVerticesBufferDescriptor.size = clothVertices.size() * sizeof(clothVertices[0]);
+        clothVerticesBufferDescriptor.mappedAtCreation = false;
+
+        common->clothVertexBuffer = wgpuDeviceCreateBuffer(device_, &clothVerticesBufferDescriptor);
+
+        wgpuQueueWriteBuffer(queue_, common->clothVertexBuffer, 0, clothVertices.data(), clothVertices.size() * sizeof(clothVertices[0]));
+
         WGPUBufferDescriptor clothEdgesBufferDescriptor;
         clothEdgesBufferDescriptor.nextInChain = nullptr;
         clothEdgesBufferDescriptor.label = nullptr;
@@ -592,10 +666,39 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
         wgpuQueueWriteBuffer(queue_, common->clothEdgesBuffer, 0, clothEdges.data(), clothEdges.size() * sizeof(clothEdges[0]));
     }
 
+    for (auto & renderObject : result)
+        if (renderObject->cloth)
+            renderObject->createClothBindGroup(device_, simulateClothBindGroupLayout_);
+
     for (std::uint32_t i = 0; i < common->textures.size(); ++i)
         loaderQueue_.push([this, common, i]{ loadTexture(*common->textures[i]); });
 
     return result;
+}
+
+void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, int iterations)
+{
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
+
+    wgpuComputePassEncoderSetPipeline(computePass, simulateClothPipeline_);
+    for (auto const & object : objects)
+    {
+        if (!object->cloth) continue;
+
+        wgpuComputePassEncoderSetBindGroup(computePass, 0, object->clothBindGroup, 0, nullptr);
+        for (int i = 0; i < iterations; ++i)
+            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->vertices.count / 1, 1, 1);
+    }
+
+    wgpuComputePassEncoderEnd(computePass);
+
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
 }
 
 void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
