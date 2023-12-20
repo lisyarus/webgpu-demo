@@ -451,7 +451,7 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     }
 
     if (!noEdges) {
-        force += vec3f(0.0, -GRAVITY, 0.0);
+        force += vec3f(0.0, - GRAVITY * MASS, 0.0);
     }
 
     let currentVelocity = clothVertices[id.x].velocity;
