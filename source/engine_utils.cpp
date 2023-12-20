@@ -486,6 +486,14 @@ WGPUShaderModule createShaderModule(WGPUDevice device, char const * code)
     return wgpuDeviceCreateShaderModule(device, &shaderModuleDescriptor);
 }
 
+std::uint32_t minStorageBufferOffsetAlignment(WGPUDevice device)
+{
+    WGPUSupportedLimits limits;
+    limits.nextInChain = nullptr;
+    wgpuDeviceGetLimits(device, &limits);
+    return limits.limits.minStorageBufferOffsetAlignment;
+}
+
 WGPUBindGroupLayout createEmptyBindGroupLayout(WGPUDevice device)
 {
     WGPUBindGroupLayoutDescriptor descriptor;

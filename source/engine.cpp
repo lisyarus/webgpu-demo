@@ -29,6 +29,8 @@ private:
     WGPUDevice device_;
     WGPUQueue queue_;
 
+    std::uint32_t minStorageBufferOffsetAlignment_;
+
     using Task = std::function<void()>;
 
     SynchronizedQueue<Task> loaderQueue_;
@@ -125,6 +127,7 @@ private:
 Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     : device_(device)
     , queue_(queue)
+    , minStorageBufferOffsetAlignment_(minStorageBufferOffsetAlignment(device_))
     , loaderThread_([this]{ loaderThreadMain(); })
 
     // Bind group layouts
@@ -638,6 +641,17 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 }
 
                 renderObject->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
+
+                auto fixAlignment = [&](auto & buffer)
+                {
+                    while (((buffer.size() * sizeof(buffer[0])) % minStorageBufferOffsetAlignment_) != 0)
+                        buffer.push_back({});
+                };
+
+                fixAlignment(vertices);
+                fixAlignment(indices);
+                fixAlignment(clothVertices);
+                fixAlignment(clothEdges);
             }
         }
 

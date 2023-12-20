@@ -69,6 +69,8 @@ extern const char genEnvMipmapShader[];
 extern const char blurShadowShader[];
 extern const char simulateClothShader[];
 
+std::uint32_t minStorageBufferOffsetAlignment(WGPUDevice device);
+
 WGPUShaderModule createShaderModule(WGPUDevice device, char const * code);
 
 WGPUBindGroupLayout createEmptyBindGroupLayout(WGPUDevice device);
