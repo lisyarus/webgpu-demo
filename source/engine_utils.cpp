@@ -410,6 +410,7 @@ struct Vertex {
 }
 
 struct ClothVertex {
+    oldVelocity : vec3f,
     velocity : vec3f,
     newPosition : vec3f,
 }
@@ -437,7 +438,8 @@ const DT = 0.01;
 const SPRING_FORCE = 200.0;
 const MASS = 0.1;
 const GRAVITY = 0.5;
-const DAMPING = 0.25;
+const DAMPING = 0.04;
+const SMOOTHING = 10.0;
 const FRICTION = 1.0;
 const SHOCK = 0.2;
 
@@ -474,7 +476,8 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     let currentPosition = getPosition(id.x);
 
     var force = vec3f(0.0);
-    var noEdges = true;
+    var avgVelocity = vec3f(0.0);
+    var edgeCount = 0;
     for (var i = 0u; i < CLOTH_EDGES_PER_VERTEX; i += 1u) {
         let edge = clothEdges[id.x * CLOTH_EDGES_PER_VERTEX + i];
         if (edge.id != 0xffffffffu) {
@@ -482,11 +485,13 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
             let distance = length(delta);
             force += delta * (SPRING_FORCE * (distance - edge.length) / distance);
 
-            noEdges = false;
+            avgVelocity += clothVertices[edge.id].oldVelocity;
+
+            edgeCount += 1;
         }
     }
 
-    if (!noEdges) {
+    if (edgeCount > 0) {
         force += vec3f(0.0, - GRAVITY * MASS, 0.0);
 
         let shockDelta = currentPosition - camera.shock.xyz;
@@ -496,9 +501,13 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
         force += shockDelta * (shockStrength / shockDistance);
 
         let currentVelocity = clothVertices[id.x].velocity;
-        let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
 
-        let collision = collideCamera(currentPosition + newVelocity * DT, newVelocity, 0.5);
+        avgVelocity /= f32(edgeCount);
+
+        let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
+        let smoothedVelocity = mix(avgVelocity, newVelocity, exp(- SMOOTHING * DT));
+
+        let collision = collideCamera(currentPosition + smoothedVelocity * DT, smoothedVelocity, 0.5);
 
         clothVertices[id.x].velocity = collision.velocity;
         clothVertices[id.x].newPosition = collision.position;
@@ -509,6 +518,7 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
 @compute @workgroup_size(32)
 fn simulateClothCopy(@builtin(global_invocation_id) id : vec3u) {
+    clothVertices[id.x].oldVelocity = clothVertices[id.x].velocity;
     setPosition(id.x, clothVertices[id.x].newPosition);
 }
 

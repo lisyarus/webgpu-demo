@@ -547,7 +547,10 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                     renderObject->cloth->vertices.byteLength = renderObject->cloth->vertices.count * sizeof(clothVertices[0]);
 
                     for (int i = 0; i < vertexCount; ++i)
-                        clothVertices.push_back({glm::vec3(0.f)});
+                        clothVertices.push_back({
+                                .oldVelocity = glm::vec3(0.f),
+                                .velocity = glm::vec3(0.f),
+                            });
 
                     auto baseVertex = renderObject->vertices.byteOffset / sizeof(vertices[0]);
                     auto baseIndex = renderObject->indices.byteOffset / sizeof(indices[0]);

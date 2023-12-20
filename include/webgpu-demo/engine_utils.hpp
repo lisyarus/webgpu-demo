@@ -17,10 +17,12 @@ struct Vertex
 
 struct ClothVertex
 {
-    glm::vec3 velocity;
+    glm::vec3 oldVelocity;
     float padding1[1];
+    glm::vec3 velocity;
+    float padding2[1];
     glm::vec3 newPosition;
-    float padding2[2];
+    float padding3[2];
 };
 
 struct ClothEdge
