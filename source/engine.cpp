@@ -22,7 +22,7 @@ struct Engine::Impl
     ~Impl();
 
     void setEnvMap(std::filesystem::path const & hdrImagePath);
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings);
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
 private:
@@ -119,7 +119,7 @@ private:
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
-    void updateLightsUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings);
+    void updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
 };
@@ -350,7 +350,7 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
     });
 }
 
-void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings)
+void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)
 {
     for (auto task : renderQueue_.grab())
         task();
@@ -367,12 +367,12 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     updateObjectUniformBuffer(objects);
 
-    if (!lightSettings.paused)
+    if (!settings.paused)
         simulateCloth(objects, camera, 16);
 
     WGPUTextureView targetView = createTextureView(target);
 
-    glm::mat4 shadowProjection = computeShadowProjection(lightSettings.sunDirection, sceneBbox);
+    glm::mat4 shadowProjection = computeShadowProjection(settings.sunDirection, sceneBbox);
 
     updateCameraUniformBufferShadow(shadowProjection);
     renderShadow(objects);
@@ -380,7 +380,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     blurShadow();
 
     updateCameraBuffer(camera, cameraUniformBuffer_);
-    updateLightsUniformBuffer(shadowProjection, lightSettings);
+    updateLightsUniformBuffer(shadowProjection, settings);
 
     renderEnv(targetView);
     renderMain(objects, targetView);
@@ -985,14 +985,14 @@ void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProje
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
-void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection, LightSettings const & lightSettings)
+void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings)
 {
     LightsUniform lightsUniform;
     lightsUniform.shadowProjection = shadowProjection;
-    lightsUniform.ambientLight = lightSettings.ambientLight;
-    lightsUniform.envIntensity = lightSettings.envIntensity;
-    lightsUniform.sunDirection = lightSettings.sunDirection;
-    lightsUniform.sunIntensity = lightSettings.sunIntensity;
+    lightsUniform.ambientLight = settings.ambientLight;
+    lightsUniform.envIntensity = settings.envIntensity;
+    lightsUniform.sunDirection = settings.sunDirection;
+    lightsUniform.sunIntensity = settings.sunIntensity;
 
     wgpuQueueWriteBuffer(queue_, lightsUniformBuffer_, 0, &lightsUniform, sizeof(LightsUniform));
 }
@@ -1128,9 +1128,9 @@ void Engine::setEnvMap(std::filesystem::path const & hdrImagePath)
     pimpl_->setEnvMap(hdrImagePath);
 }
 
-void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, LightSettings const & lightSettings)
+void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)
 {
-    pimpl_->render(target, objects, camera, sceneBbox, lightSettings);
+    pimpl_->render(target, objects, camera, sceneBbox, settings);
 }
 
 Box Engine::bbox(std::vector<RenderObjectPtr> const & objects) const

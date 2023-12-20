@@ -29,9 +29,9 @@ int main()
     std::unordered_set<SDL_Scancode> keysDown;
 
     int frameId = 0;
-    float time = 0.f;
+    float time = 5.f;
 
-    bool paused = false;
+    bool paused = true;
     bool day = true;
     bool vsync = true;
 
@@ -95,7 +95,7 @@ int main()
         auto thisFrameStart = std::chrono::high_resolution_clock::now();
         float const dt = std::chrono::duration_cast<std::chrono::duration<float>>(thisFrameStart - lastFrameStart).count();
         if (!paused)
-            time += dt;
+            time += dt*0;
         lastFrameStart = thisFrameStart;
 
         camera.update(dt, {
@@ -107,11 +107,11 @@ int main()
             .movingSlow     = keysDown.contains(SDL_SCANCODE_LCTRL),
         });
 
-        Engine::LightSettings lightSettings;
+        Engine::Settings settings;
 
         if (day)
         {
-            lightSettings =
+            settings =
             {
                 .skyColor = {0.4f, 0.7f, 1.f},
                 .ambientLight = {0.5f, 0.4f, 0.3f},
@@ -122,7 +122,7 @@ int main()
         }
         else
         {
-            lightSettings =
+            settings =
             {
                 .skyColor = {0.0f, 0.0f, 0.001f},
                 .ambientLight = {0.05f, 0.1f, 0.15f},
@@ -132,9 +132,9 @@ int main()
             };
         }
 
-        lightSettings.paused = paused;
+        settings.paused = paused;
 
-        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, lightSettings);
+        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings);
 
         application.present();
 
