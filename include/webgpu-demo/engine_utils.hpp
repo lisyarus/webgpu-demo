@@ -22,13 +22,14 @@ struct ClothVertex
     glm::vec3 velocity;
     float padding2[1];
     glm::vec3 newPosition;
-    float padding3[2];
+    float padding3[1];
 };
 
 struct ClothEdge
 {
+    glm::vec4 delta;
     std::uint32_t id;
-    float length;
+    float padding1[3];
 };
 
 struct CameraUniform

@@ -416,8 +416,8 @@ struct ClothVertex {
 }
 
 struct ClothEdge {
+    delta : vec4f,
     id : u32,
-    length : f32,
 }
 
 struct Camera {
@@ -453,6 +453,17 @@ fn setPosition(id : u32, value : vec3f) {
     vertices[id].data[2] = value.z;
 }
 
+fn getRotation(id : u32) -> vec4f {
+    return vec4f(vertices[id].data[12], vertices[id].data[13], vertices[id].data[14], vertices[id].data[15]);
+}
+
+fn setRotation(id : u32, value : vec4f) {
+    vertices[id].data[12] = value.x;
+    vertices[id].data[13] = value.y;
+    vertices[id].data[14] = value.z;
+    vertices[id].data[15] = value.w;
+}
+
 struct CollideResult {
     position : vec3f,
     velocity : vec3f,
@@ -483,7 +494,7 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
         if (edge.id != 0xffffffffu) {
             let delta = getPosition(edge.id) - currentPosition;
             let distance = length(delta);
-            force += delta * (SPRING_FORCE * (distance - edge.length) / distance);
+            force += delta * (SPRING_FORCE * (distance - edge.delta.w) / distance);
 
             avgVelocity += clothVertices[edge.id].oldVelocity;
 
@@ -516,8 +527,48 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     }
 }
 
+// The matrix of the linear operator (q -> q * a)
+fn rightMultMatrix(a : vec4f) -> mat4x4f {
+    return mat4x4f(
+        vec4f( a.w, -a.z,  a.y, -a.x),
+        vec4f( a.z,  a.w, -a.x, -a.y),
+        vec4f(-a.y,  a.x,  a.w, -a.z),
+        vec4f( a.x,  a.y,  a.z,  a.w),
+    );
+}
+
+// The matrix of the linear operator (q -> b * q)
+fn leftMultMatrix(b : vec4f) -> mat4x4f {
+    return mat4x4f(
+        vec4f( b.w,  b.z, -b.y, -b.x),
+        vec4f(-b.z,  b.w,  b.x, -b.y),
+        vec4f( b.y, -b.x,  b.w, -b.z),
+        vec4f( b.x,  b.y,  b.z,  b.w),
+    );
+}
+
 @compute @workgroup_size(32)
 fn simulateClothCopy(@builtin(global_invocation_id) id : vec3u) {
+    var errorMatrix = mat4x4f(vec4f(0.0), vec4f(0.0), vec4f(0.0), vec4f(0.0));
+
+    let currentPosition = clothVertices[id.x].newPosition;
+
+    for (var i = 0u; i < CLOTH_EDGES_PER_VERTEX; i += 1u) {
+        let edge = clothEdges[id.x * CLOTH_EDGES_PER_VERTEX + i];
+        if (edge.id != 0xffffffffu) {
+            let delta = edge.delta.xyz;
+            let currentDelta = clothVertices[edge.id].newPosition - currentPosition;
+
+            let m = rightMultMatrix(vec4f(delta, 0.0)) - leftMultMatrix(vec4f(currentDelta, 0.0));
+            errorMatrix += transpose(m) * m;
+        }
+    }
+
+    let currentRotation = getRotation(id.x);
+    let rotationGrad = 2.0 * currentRotation * errorMatrix;
+    let newRotation = normalize(currentRotation - rotationGrad * 0.25);
+    setRotation(id.x, newRotation);
+
     clothVertices[id.x].oldVelocity = clothVertices[id.x].velocity;
     setPosition(id.x, clothVertices[id.x].newPosition);
 }

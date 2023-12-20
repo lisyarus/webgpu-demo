@@ -26,6 +26,8 @@ struct Camera
     glm::mat4 projectionMatrix() const;
     glm::mat4 viewProjectionMatrix() const;
     glm::vec3 position() const { return position_; }
+    float angleX() const { return xAngle_; }
+    float angleY() const { return yAngle_; }
 
 private:
     glm::vec3 position_ = glm::vec3(0.0, 0.0, 5.0);

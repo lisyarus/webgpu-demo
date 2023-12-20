@@ -19,8 +19,10 @@ int main()
     auto sceneBbox = engine.bbox(renderObjects);
 
     Camera camera;
-    camera.move({-11.f, 1.5f, -0.25f});
+    camera.move({-9.f, 1.5f, -0.25f});
+//    camera.move({-8.51785f, 1.50002f, 0.910748f});
     camera.setRotation(glm::radians(90.f), 0.f);
+//    camera.setRotation(0.889796f, 0.108f);
     camera.setFov(glm::radians(45.f), application.width() * 1.f / application.height());
     float sceneDiagonal = glm::distance(sceneBbox.min, sceneBbox.max);
     camera.setClip(sceneDiagonal / 1000.f, sceneDiagonal);
@@ -29,7 +31,7 @@ int main()
     std::unordered_set<SDL_Scancode> keysDown;
 
     int frameId = 0;
-    float time = 5.f;
+    float time = 0.f;
 
     bool paused = true;
     bool day = true;
@@ -120,6 +122,11 @@ int main()
 
         Engine::Settings settings;
 
+        float const lightRotationSpeed = 0.1f;
+        float const lightPhaseShift = 0.f;
+
+        float const lightPhase = time * lightRotationSpeed + lightPhaseShift;
+
         if (day)
         {
             settings =
@@ -127,7 +134,7 @@ int main()
                 .skyColor = {0.4f, 0.7f, 1.f},
                 .ambientLight = {0.5f, 0.4f, 0.3f},
                 .envIntensity = 0.5f,
-                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 2.f, std::sin(time * 0.1f)}),
+                .sunDirection = glm::normalize(glm::vec3{std::cos(lightPhase), 2.f, std::sin(lightPhase)}),
                 .sunIntensity = {20.f, 16.f, 12.f},
             };
         }
@@ -138,7 +145,7 @@ int main()
                 .skyColor = {0.0f, 0.0f, 0.001f},
                 .ambientLight = {0.05f, 0.1f, 0.15f},
                 .envIntensity = 0.05f,
-                .sunDirection = glm::normalize(glm::vec3{std::cos(time * 0.1f), 2.f, std::sin(time * 0.1f)}),
+                .sunDirection = glm::normalize(glm::vec3{std::cos(lightPhase), 2.f, std::sin(lightPhase)}),
                 .sunIntensity = {1.f, 2.f, 3.f},
             };
         }

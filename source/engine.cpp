@@ -367,8 +367,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     updateObjectUniformBuffer(objects);
 
-    if (!settings.paused)
-        simulateCloth(objects, camera, settings, 16);
+    simulateCloth(objects, camera, settings, settings.paused ? 0 : 16);
 
     WGPUTextureView targetView = createTextureView(target);
 
@@ -546,12 +545,6 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                     renderObject->cloth->vertices.count = vertexCount;
                     renderObject->cloth->vertices.byteLength = renderObject->cloth->vertices.count * sizeof(clothVertices[0]);
 
-                    for (int i = 0; i < vertexCount; ++i)
-                        clothVertices.push_back({
-                                .oldVelocity = glm::vec3(0.f),
-                                .velocity = glm::vec3(0.f),
-                            });
-
                     auto baseVertex = renderObject->vertices.byteOffset / sizeof(vertices[0]);
                     auto baseIndex = renderObject->indices.byteOffset / sizeof(indices[0]);
 
@@ -625,10 +618,13 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         for (auto e : vertexEdges)
                         {
                             ClothEdge edge;
+                            edge.delta = glm::vec4(0.f);
                             edge.id = e;
-                            edge.length = 0.f;
                             if (e != std::uint32_t(-1))
-                                edge.length = glm::distance(vertices[baseVertex + i].position, vertices[baseVertex + e].position);
+                            {
+                                auto delta = vertices[baseVertex + e].position - vertices[baseVertex + i].position;
+                                edge.delta = glm::vec4(delta, glm::length(delta));
+                            }
                             clothEdges.push_back(edge);
                         }
                     }
@@ -643,6 +639,13 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         position.y = topY + radius * (1.f - std::cos(angle));
                         position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
                     }
+
+                    for (int i = 0; i < vertexCount; ++i)
+                        clothVertices.push_back({
+                                .oldVelocity = glm::vec3(0.f),
+                                .velocity = glm::vec3(0.f),
+                                .newPosition = vertices[baseVertex + i].position,
+                            });
                 }
 
                 renderObject->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
@@ -744,6 +747,12 @@ void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, C
             wgpuComputePassEncoderSetPipeline(computePass, simulateClothPipeline_);
             wgpuComputePassEncoderDispatchWorkgroups(computePass, object->cloth->vertices.count / 32, 1, 1);
 
+            wgpuComputePassEncoderSetPipeline(computePass, simulateClothCopyPipeline_);
+            wgpuComputePassEncoderDispatchWorkgroups(computePass, object->cloth->vertices.count / 32, 1, 1);
+        }
+
+        if (iterations == 0)
+        {
             wgpuComputePassEncoderSetPipeline(computePass, simulateClothCopyPipeline_);
             wgpuComputePassEncoderDispatchWorkgroups(computePass, object->cloth->vertices.count / 32, 1, 1);
         }
