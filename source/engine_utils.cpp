@@ -412,9 +412,17 @@ struct ClothEdge {
     length : f32,
 }
 
+struct Camera {
+    viewProjection : mat4x4f,
+    viewProjectionInverse : mat4x4f,
+    position : vec3f,
+}
+
 @group(0) @binding(0) var<storage, read_write> vertices : array<Vertex>;
 @group(0) @binding(1) var<storage, read_write> clothVertices : array<ClothVertex>;
 @group(0) @binding(2) var<storage, read> clothEdges : array<ClothEdge>;
+
+@group(1) @binding(0) var<uniform> camera: Camera;
 
 const CLOTH_EDGES_PER_VERTEX = 8u;
 const DT = 0.01;
@@ -422,6 +430,7 @@ const SPRING_FORCE = 200.0;
 const MASS = 1.0;
 const GRAVITY = 10.0;
 const DAMPING = 0.05;
+const FRICTION = 1.0;
 
 fn getPosition(id : u32) -> vec3f {
     return vec3f(vertices[id].data[0], vertices[id].data[1], vertices[id].data[2]);
@@ -431,6 +440,24 @@ fn setPosition(id : u32, value : vec3f) {
     vertices[id].data[0] = value.x;
     vertices[id].data[1] = value.y;
     vertices[id].data[2] = value.z;
+}
+
+struct CollideResult {
+    position : vec3f,
+    velocity : vec3f,
+}
+
+fn collideCamera(position : vec3f, velocity : vec3f, radius : f32) -> CollideResult {
+    let delta = position - camera.position;
+    let distance = length(delta);
+    if (distance >= radius) {
+        return CollideResult(position, velocity);
+    } else {
+        let n = delta / distance;
+        let newPosition = camera.position + n * radius;
+        let newVelocity = (velocity - n * dot(velocity, n)) * exp(- FRICTION * DT);
+        return CollideResult(newPosition, newVelocity);
+    }
 }
 
 @compute @workgroup_size(32)
@@ -452,15 +479,17 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
     if (!noEdges) {
         force += vec3f(0.0, - GRAVITY * MASS, 0.0);
+
+        let currentVelocity = clothVertices[id.x].velocity;
+        let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
+
+        let collision = collideCamera(currentPosition + newVelocity * DT, newVelocity, 100.0);
+
+        clothVertices[id.x].velocity = collision.velocity;
+        clothVertices[id.x].newPosition = collision.position;
+    } else {
+        clothVertices[id.x].newPosition = currentPosition;
     }
-
-    let currentVelocity = clothVertices[id.x].velocity;
-
-    let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
-
-    clothVertices[id.x].velocity = newVelocity;
-
-    clothVertices[id.x].newPosition = currentPosition + newVelocity * DT;
 }
 
 @compute @workgroup_size(32)
@@ -510,7 +539,7 @@ WGPUBindGroupLayout createCameraBindGroupLayout(WGPUDevice device)
     WGPUBindGroupLayoutEntry entries[1];
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
-    entries[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+    entries[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
     entries[0].buffer.nextInChain = nullptr;
     entries[0].buffer.type = WGPUBufferBindingType_Uniform;
     entries[0].buffer.hasDynamicOffset = false;

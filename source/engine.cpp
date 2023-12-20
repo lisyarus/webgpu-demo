@@ -108,14 +108,14 @@ private:
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
-    void simulateCloth(std::vector<RenderObjectPtr> const & objects, int iterations);
+    void simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, int iterations);
     void renderShadow(std::vector<RenderObjectPtr> const & objects);
     void blurShadow();
     void renderEnv(WGPUTextureView targetView);
     void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
-    void updateCameraUniformBuffer(Camera const & camera);
+    void updateCameraBuffer(Camera const & camera, WGPUBuffer buffer);
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
@@ -176,7 +176,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , blurShadowPipelineLayout_(createPipelineLayout(device_, {blurShadowBindGroupLayout_}))
     , blurShadowXPipeline_(createBlurShadowXPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
     , blurShadowYPipeline_(createBlurShadowYPipeline(device_, blurShadowPipelineLayout_, blurShadowShaderModule_))
-    , simulateClothPipelineLayout_(createPipelineLayout(device_, {simulateClothBindGroupLayout_}))
+    , simulateClothPipelineLayout_(createPipelineLayout(device_, {simulateClothBindGroupLayout_, cameraBindGroupLayout_}))
     , simulateClothPipeline_(createSimulateClothPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
     , simulateClothCopyPipeline_(createSimulateClothCopyPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
 
@@ -368,7 +368,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     updateObjectUniformBuffer(objects);
 
     if (!lightSettings.paused)
-        simulateCloth(objects, 16);
+        simulateCloth(objects, camera, 16);
 
     WGPUTextureView targetView = createTextureView(target);
 
@@ -379,7 +379,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     blurShadow();
 
-    updateCameraUniformBuffer(camera);
+    updateCameraBuffer(camera, cameraUniformBuffer_);
     updateLightsUniformBuffer(shadowProjection, lightSettings);
 
     renderEnv(targetView);
@@ -714,11 +714,19 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
     return result;
 }
 
-void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, int iterations)
+void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, int iterations)
 {
+    {
+        CameraUniform cameraUniform;
+        cameraUniform.position = glm::inverse(objects[0]->uniforms.modelMatrix) * glm::vec4(camera.position(), 1.f);
+        wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(cameraUniform));
+    }
+
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
     WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
+
+    wgpuComputePassEncoderSetBindGroup(computePass, 1, cameraBindGroup_, 0, nullptr);
 
     for (auto const & object : objects)
     {
@@ -905,14 +913,14 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTe
     }
 }
 
-void Engine::Impl::updateCameraUniformBuffer(Camera const & camera)
+void Engine::Impl::updateCameraBuffer(Camera const & camera, WGPUBuffer buffer)
 {
     CameraUniform cameraUniform;
     cameraUniform.viewProjection = glToVkProjection(camera.viewProjectionMatrix());
     cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
     cameraUniform.position = camera.position();
 
-    wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
+    wgpuQueueWriteBuffer(queue_, buffer, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
 void Engine::Impl::updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects)
