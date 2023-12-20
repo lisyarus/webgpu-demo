@@ -108,14 +108,14 @@ private:
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
-    void simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, int iterations);
+    void simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, Settings const & settings, int iterations);
     void renderShadow(std::vector<RenderObjectPtr> const & objects);
     void blurShadow();
     void renderEnv(WGPUTextureView targetView);
     void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
-    void updateCameraBuffer(Camera const & camera, WGPUBuffer buffer);
+    void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer);
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
@@ -368,7 +368,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     updateObjectUniformBuffer(objects);
 
     if (!settings.paused)
-        simulateCloth(objects, camera, 16);
+        simulateCloth(objects, camera, settings, 16);
 
     WGPUTextureView targetView = createTextureView(target);
 
@@ -379,7 +379,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     blurShadow();
 
-    updateCameraBuffer(camera, cameraUniformBuffer_);
+    updateCameraBuffer(camera, settings, cameraUniformBuffer_);
     updateLightsUniformBuffer(shadowProjection, settings);
 
     renderEnv(targetView);
@@ -474,7 +474,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                 renderObject->indices.count = indexAccessor.count;
                 renderObject->indexFormat = WGPUIndexFormat_Uint16;
 
-                renderObject->uniforms.modelMatrix = nodeModelMatrix;
+                renderObject->uniforms.modelMatrix = glm::mat4(1.f);
                 renderObject->uniforms.baseColorFactor = materialIn.baseColorFactor;
                 renderObject->uniforms.metallicFactor = materialIn.metallicFactor;
                 renderObject->uniforms.roughnessFactor = materialIn.roughnessFactor;
@@ -516,9 +516,11 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         glm::vec4(0.f, 0.f, 0.f, 1.f)
                     });
 
-                    auto transformedVertex = glm::vec3((renderObject->uniforms.modelMatrix * glm::vec4(vertices.back().position, 1.f)));
+                    vertices.back().position = glm::vec3((nodeModelMatrix * glm::vec4(vertices.back().position, 1.f)));
+                    vertices.back().normal = glm::normalize(glm::vec3((nodeModelMatrix * glm::vec4(vertices.back().normal, 0.f))));
+                    vertices.back().tangent = glm::vec4(glm::normalize(glm::vec3((nodeModelMatrix * glm::vec4(glm::vec3(vertices.back().tangent), 0.f)))), vertices.back().tangent.w);
 
-                    renderObject->bbox.expand(transformedVertex);
+                    renderObject->bbox.expand(vertices.back().position);
                 }
 
                 auto indexIterator = glTF::AccessorIterator<std::uint16_t>(assetBufferData.data() + indexBufferView.byteOffset + indexAccessor.byteOffset, indexBufferView.byteStride);
@@ -633,7 +635,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                     {
                         auto & position = vertices[baseVertex + i].position;
                         float distance = topY - position.y;
-                        float radius = 250.f;
+                        float radius = 2.f;
                         float angle = distance / radius;
                         position.y = topY + radius * (1.f - std::cos(angle));
                         position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
@@ -714,11 +716,12 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
     return result;
 }
 
-void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, int iterations)
+void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, Settings const & settings, int iterations)
 {
     {
         CameraUniform cameraUniform;
-        cameraUniform.position = glm::inverse(objects[0]->uniforms.modelMatrix) * glm::vec4(camera.position(), 1.f);
+        cameraUniform.position = camera.position();
+        cameraUniform.shock = glm::vec4(settings.shockCenter, settings.shockDistance);
         wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(cameraUniform));
     }
 
@@ -913,12 +916,13 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTe
     }
 }
 
-void Engine::Impl::updateCameraBuffer(Camera const & camera, WGPUBuffer buffer)
+void Engine::Impl::updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer)
 {
     CameraUniform cameraUniform;
     cameraUniform.viewProjection = glToVkProjection(camera.viewProjectionMatrix());
     cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
     cameraUniform.position = camera.position();
+    cameraUniform.shock = glm::vec4(settings.shockCenter, settings.shockDistance);
 
     wgpuQueueWriteBuffer(queue_, buffer, 0, &cameraUniform, sizeof(CameraUniform));
 }

@@ -37,6 +37,9 @@ int main()
 
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
+    glm::vec3 shockCenter(0.f);
+    float shockDistance = 1e9f;
+
     for (bool running = true; running;)
     {
 //        std::cout << "Frame " << frameId << std::endl;
@@ -79,6 +82,11 @@ int main()
                 vsync ^= true;
                 application.resize(application.width(), application.height(), vsync);
             }
+            if (event->key.keysym.scancode == SDL_SCANCODE_F)
+            {
+                shockCenter = camera.position();
+                shockDistance = 0.f;
+            }
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);
@@ -95,7 +103,10 @@ int main()
         auto thisFrameStart = std::chrono::high_resolution_clock::now();
         float const dt = std::chrono::duration_cast<std::chrono::duration<float>>(thisFrameStart - lastFrameStart).count();
         if (!paused)
-            time += dt*0;
+        {
+            time += dt;
+            shockDistance += sceneDiagonal * 0.4f * dt;
+        }
         lastFrameStart = thisFrameStart;
 
         camera.update(dt, {
@@ -133,6 +144,8 @@ int main()
         }
 
         settings.paused = paused;
+        settings.shockCenter = shockCenter;
+        settings.shockDistance = shockDistance;
 
         engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings);
 

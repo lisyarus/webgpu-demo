@@ -20,6 +20,7 @@ struct Camera {
     viewProjection : mat4x4f,
     viewProjectionInverse : mat4x4f,
     position : vec3f,
+    shock : vec4f,
 }
 
 struct Object {
@@ -208,7 +209,13 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
 
     let outColor = lights.ambientLight * baseColor + material * lightness * shadowFactor * lights.sunIntensity;
 
-    return vec4f(tonemap(outColor), baseColorSample.a);
+    let shockDistance = length(camera.shock.xyz - in.worldPosition);
+    let shockD = camera.shock.w - shockDistance;
+    let shockFactor = exp(- shockD * shockD * 10.0) + 0.04 * step(0.0, shockD) * exp(- shockD * shockD * 0.4) * (0.5 + 0.5 * sin(shockD * 16.0));
+
+    let shockColor = mix(outColor, lights.sunIntensity * 0.3, shockFactor);
+
+    return vec4f(tonemap(shockColor), baseColorSample.a);
 }
 
 struct ShadowVertexInput {
@@ -416,6 +423,7 @@ struct Camera {
     viewProjection : mat4x4f,
     viewProjectionInverse : mat4x4f,
     position : vec3f,
+    shock : vec4f,
 }
 
 @group(0) @binding(0) var<storage, read_write> vertices : array<Vertex>;
@@ -427,10 +435,11 @@ struct Camera {
 const CLOTH_EDGES_PER_VERTEX = 8u;
 const DT = 0.01;
 const SPRING_FORCE = 200.0;
-const MASS = 1.0;
-const GRAVITY = 10.0;
-const DAMPING = 0.05;
+const MASS = 0.1;
+const GRAVITY = 0.5;
+const DAMPING = 0.25;
 const FRICTION = 1.0;
+const SHOCK = 0.2;
 
 fn getPosition(id : u32) -> vec3f {
     return vec3f(vertices[id].data[0], vertices[id].data[1], vertices[id].data[2]);
@@ -480,10 +489,16 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     if (!noEdges) {
         force += vec3f(0.0, - GRAVITY * MASS, 0.0);
 
+        let shockDelta = currentPosition - camera.shock.xyz;
+        let shockDistance = length(shockDelta);
+        let shockStrength = SHOCK * exp(- (shockDistance - camera.shock.w) * (shockDistance - camera.shock.w) * 1.0);
+
+        force += shockDelta * (shockStrength / shockDistance);
+
         let currentVelocity = clothVertices[id.x].velocity;
         let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
 
-        let collision = collideCamera(currentPosition + newVelocity * DT, newVelocity, 100.0);
+        let collision = collideCamera(currentPosition + newVelocity * DT, newVelocity, 0.5);
 
         clothVertices[id.x].velocity = collision.velocity;
         clothVertices[id.x].newPosition = collision.position;

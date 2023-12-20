@@ -35,6 +35,7 @@ struct CameraUniform
     glm::mat4 viewProjectionInverse;
     glm::vec3 position;
     float padding1[1];
+    glm::vec4 shock;
 };
 
 struct ObjectUniform

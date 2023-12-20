@@ -34,6 +34,8 @@ struct Engine
         glm::vec3 sunDirection;
         glm::vec3 sunIntensity;
         bool paused;
+        glm::vec3 shockCenter;
+        float shockDistance;
     };
 
     void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);
