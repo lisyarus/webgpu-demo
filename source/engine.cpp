@@ -629,8 +629,8 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                     {
                         auto & position = vertices[baseVertex + i].position;
                         float distance = topY - position.y;
-                        position.y = topY;
-                        position.z += distance * (position.z < 0.f ? 1.f : -1.f);
+                        position.y = topY + (distance * distance) / 700.f;
+                        position.z += (distance * 0.75f) * (position.z < 0.f ? 1.f : -1.f);
                     }
                 }
 
