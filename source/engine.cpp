@@ -625,12 +625,15 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         }
                     }
 
+                    // Initial curtain shape, fit to the Sponza scene
                     for (int i = 0; i < renderObject->vertices.count; ++i)
                     {
                         auto & position = vertices[baseVertex + i].position;
                         float distance = topY - position.y;
-                        position.y = topY + (distance * distance) / 700.f;
-                        position.z += (distance * 0.75f) * (position.z < 0.f ? 1.f : -1.f);
+                        float radius = 250.f;
+                        float angle = distance / radius;
+                        position.y = topY + radius * (1.f - std::cos(angle));
+                        position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
                     }
                 }
 
