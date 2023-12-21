@@ -786,11 +786,11 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                             }
                             else
                             {
-                                float distance = topY - position.y;
-                                float radius = 2.f;
-                                float angle = distance / radius;
-                                position.y = topY + radius * (1.f - std::cos(angle));
-                                position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
+//                                float distance = topY - position.y;
+//                                float radius = 2.f;
+//                                float angle = distance / radius;
+//                                position.y = topY + radius * (1.f - std::cos(angle));
+//                                position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
                             }
                         }
 
