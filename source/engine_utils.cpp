@@ -278,9 +278,9 @@ fn volumetricLight(
     for (var i = 0; i < N; i += 1) {
         let p = rayStart + (tmin + (f32(i) + 0.5) * dt) * d;
         let v = fractalNoise(p * vec3f(1.0, 0.5, 1.0) + vec3f(0.0, - camera.time * 0.25, 0.0))
-            * pow(1.0 - length(p - lightPosition) / radius, 0.2);
+            * pow(1.0 - length(p.xz - lightPosition.xz) / radius, 0.2);
 
-        result += max(0.0, 4.0 * (v - mix(0.5, 0.7, (p.y - lightPosition.y) / radius))) * dt;
+        result += max(0.0, 4.0 * (v - mix(0.4, 0.55, pow(0.5 + 0.5 * (p.y - lightPosition.y) / radius, 1.5)))) * dt;
     }
 
     return lightIntensity * result;
