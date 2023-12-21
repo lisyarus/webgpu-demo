@@ -563,10 +563,80 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                         edges[i2].push_back(i1);
                     }
 
+                    std::vector<int> component(vertexCount, -1);
+                    int componentCount = 0;
+                    std::vector<int> componentVertices;
+
+                    for (int i = 0; i < vertexCount; ++i)
+                    {
+                        if (component[i] != -1) continue;
+
+                        component[i] = componentCount++;
+                        componentVertices.push_back(1);
+
+                        std::deque<int> queue;
+                        queue.push_back(i);
+
+                        while (!queue.empty())
+                        {
+                            auto v = queue.front();
+                            queue.pop_front();
+
+                            for (auto e : edges[v])
+                            {
+                                if (component[e] == -1)
+                                {
+                                    component[e] = component[v];
+                                    queue.push_back(e);
+                                    componentVertices.back()++;
+                                }
+                            }
+                        }
+                    }
+
+                    std::vector<int> componentTriangles(componentCount, 0);
+                    std::vector<glm::vec3> avgComponentNormal(componentCount, glm::vec3(0.0));
+
+                    for (int i = 0; i < indexAccessor.count; i += 3)
+                    {
+                        auto i0 = indices[baseIndex + i + 0];
+                        auto i1 = indices[baseIndex + i + 1];
+                        auto i2 = indices[baseIndex + i + 2];
+
+                        auto c = component[i0];
+
+                        componentTriangles[c] += 1;
+
+                        auto p0 = vertices[baseVertex + i0].position;
+                        auto p1 = vertices[baseVertex + i1].position;
+                        auto p2 = vertices[baseVertex + i2].position;
+
+                        auto n = glm::normalize(glm::cross(p1 - p0, p2 - p0));
+                        avgComponentNormal[c] += n;
+                    }
+
+                    for (int c = 0; c < componentCount; ++c)
+                        if (componentTriangles[c] > 0)
+                            avgComponentNormal[c] /= (1.f * componentTriangles[c]);
+
+                    // Sponza-specific heuristic: remove cloth mesh connected components which are
+                    //    too small or face negative Z
+
+
+                    std::vector<bool> frontFacing(vertexCount, false);
+
+                    for (int i = 0; i < vertexCount; ++i)
+                    {
+                        int c = component[i];
+                        frontFacing[i] = !(componentVertices[c] < 256 || avgComponentNormal[c].z < 0.f);
+                    }
+
                     for (auto & vertexEdges : edges)
                     {
                         std::sort(vertexEdges.begin(), vertexEdges.end());
-                        vertexEdges.erase(std::unique(vertexEdges.begin(), vertexEdges.end()), vertexEdges.end());
+                        auto end = std::unique(vertexEdges.begin(), vertexEdges.end());
+                        end = std::remove_if(vertexEdges.begin(), end, [&](auto i){ return !frontFacing[i]; });
+                        vertexEdges.erase(end, vertexEdges.end());
                     }
 
                     std::vector<bool> disconnected(edges.size(), false);
@@ -595,7 +665,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                             }
                         }
 
-                        if (disconnected[i])
+                        if (disconnected[i] || !frontFacing[i])
                         {
                             vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
                             vertices[baseVertex + i].position = {0.f, 0.f, 0.f};
@@ -633,11 +703,19 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
                     for (int i = 0; i < renderObject->vertices.count; ++i)
                     {
                         auto & position = vertices[baseVertex + i].position;
-                        float distance = topY - position.y;
-                        float radius = 2.f;
-                        float angle = distance / radius;
-                        position.y = topY + radius * (1.f - std::cos(angle));
-                        position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
+
+                        if (!frontFacing[i])
+                        {
+                            position = glm::vec3(0.f);
+                        }
+                        else
+                        {
+                            float distance = topY - position.y;
+                            float radius = 2.f;
+                            float angle = distance / radius;
+                            position.y = topY + radius * (1.f - std::cos(angle));
+                            position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
+                        }
                     }
 
                     for (int i = 0; i < vertexCount; ++i)
