@@ -222,30 +222,7 @@ Engine::Impl::~Impl()
     loaderQueue_.push(nullptr);
     loaderThread_.join();
 
-    wgpuTextureRelease(whiteTexture_);
-    wgpuTextureViewRelease(depthTextureView_);
-    wgpuTextureRelease(depthTexture_);
-    wgpuTextureViewRelease(frameTextureView_);
-    wgpuTextureRelease(frameTexture_);
-    wgpuBindGroupRelease(lightsBindGroup_);
-    wgpuBindGroupRelease(objectBindGroup_);
-    wgpuBindGroupRelease(cameraBindGroup_);
-    wgpuBufferRelease(lightsUniformBuffer_);
-    wgpuBufferRelease(objectUniformBuffer_);
-    wgpuBufferRelease(cameraUniformBuffer_);
-    wgpuRenderPipelineRelease(shadowPipeline_);
-    wgpuPipelineLayoutRelease(shadowPipelineLayout_);
-    wgpuRenderPipelineRelease(mainPipeline_);
-    wgpuPipelineLayoutRelease(mainPipelineLayout_);
-    wgpuSamplerRelease(shadowSampler_);
-    wgpuSamplerRelease(defaultSampler_);
-    wgpuTextureViewRelease(shadowMapView_);
-    wgpuTextureRelease(shadowMap_);
-    wgpuShaderModuleRelease(shaderModule_);
-    wgpuBindGroupLayoutRelease(lightsBindGroupLayout_);
-    wgpuBindGroupLayoutRelease(texturesBindGroupLayout_);
-    wgpuBindGroupLayoutRelease(objectBindGroupLayout_);
-    wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
+    // TODO: properly release all WebGPU resources
 }
 
 void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)

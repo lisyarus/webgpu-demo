@@ -9,13 +9,22 @@
 #include <chrono>
 #include <unordered_set>
 
-int main()
+int main(int argc, char ** argv)
 {
     Application application;
     Engine engine(application.device(), application.queue());
     engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
-    auto renderObjects = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza.gltf");
+
+    std::vector<RenderObjectPtr> renderObjects;
+    for (int i = 1; i < argc; ++i)
     {
+        auto objects = engine.loadGLTF(argv[i]);
+        renderObjects.insert(renderObjects.end(), objects.begin(), objects.end());
+    }
+
+    if (argc == 1)
+    {
+        renderObjects = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza.gltf");
         auto lights = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza-lights.gltf");
         renderObjects.insert(renderObjects.end(), lights.begin(), lights.end());
     }
