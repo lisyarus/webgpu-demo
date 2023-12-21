@@ -263,10 +263,13 @@ namespace glTF
         return result;
     }
 
-    ImageInfo loadImage(std::filesystem::path const & assetPath, std::string const & imageUri)
+    void ImageInfo::Deleter::operator()(unsigned char * data) const
     {
-        auto const imagePath = assetPath.parent_path() / imageUri;
+        stbi_image_free(data);
+    }
 
+    ImageInfo loadImage(std::filesystem::path const & imagePath)
+    {
         ImageInfo result;
         result.data.reset(stbi_load(imagePath.c_str(), &result.width, &result.height, &result.channels, 0));
         if (result.channels == 3)
@@ -276,6 +279,11 @@ namespace glTF
             result.channels = 4;
         }
         return result;
+    }
+
+    ImageInfo loadImage(std::filesystem::path const & assetPath, std::string const & imageUri)
+    {
+        return loadImage(assetPath.parent_path() / imageUri);
     }
 
 }
