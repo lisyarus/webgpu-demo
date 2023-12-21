@@ -180,6 +180,8 @@ int main(int argc, char ** argv)
 
         application.present();
 
+        wgpuTextureRelease(surfaceTexture);
+
         ++frameId;
     }
 }

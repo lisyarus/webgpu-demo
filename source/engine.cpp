@@ -222,7 +222,75 @@ Engine::Impl::~Impl()
     loaderQueue_.push(nullptr);
     loaderThread_.join();
 
-    // TODO: properly release all WebGPU resources
+    if (emptyBindGroupLayout_) wgpuBindGroupLayoutRelease(emptyBindGroupLayout_);
+    if (cameraBindGroupLayout_) wgpuBindGroupLayoutRelease(cameraBindGroupLayout_);
+    if (objectBindGroupLayout_) wgpuBindGroupLayoutRelease(objectBindGroupLayout_);
+    if (texturesBindGroupLayout_) wgpuBindGroupLayoutRelease(texturesBindGroupLayout_);
+    if (lightsBindGroupLayout_) wgpuBindGroupLayoutRelease(lightsBindGroupLayout_);
+    if (genMipmapBindGroupLayout_) wgpuBindGroupLayoutRelease(genMipmapBindGroupLayout_);
+    if (genMipmapEnvBindGroupLayout_) wgpuBindGroupLayoutRelease(genMipmapEnvBindGroupLayout_);
+    if (blurShadowBindGroupLayout_) wgpuBindGroupLayoutRelease(blurShadowBindGroupLayout_);
+    if (simulateClothBindGroupLayout_) wgpuBindGroupLayoutRelease(simulateClothBindGroupLayout_);
+
+    if (shaderModule_) wgpuShaderModuleRelease(shaderModule_);
+    if (genMipmapShaderModule_) wgpuShaderModuleRelease(genMipmapShaderModule_);
+    if (genMipmapEnvShaderModule_) wgpuShaderModuleRelease(genMipmapEnvShaderModule_);
+    if (blurShadowShaderModule_) wgpuShaderModuleRelease(blurShadowShaderModule_);
+    if (simulateClothShaderModule_) wgpuShaderModuleRelease(simulateClothShaderModule_);
+
+    if (shadowMap_) wgpuTextureRelease(shadowMap_);
+    if (shadowMapAux_) wgpuTextureRelease(shadowMapAux_);
+    if (shadowMapDepth_) wgpuTextureRelease(shadowMapDepth_);
+    if (shadowMapView_) wgpuTextureViewRelease(shadowMapView_);
+    if (shadowMapAuxView_) wgpuTextureViewRelease(shadowMapAuxView_);
+    if (shadowMapDepthView_) wgpuTextureViewRelease(shadowMapDepthView_);
+
+    if (defaultSampler_) wgpuSamplerRelease(defaultSampler_);
+    if (shadowSampler_) wgpuSamplerRelease(shadowSampler_);
+    if (envSampler_) wgpuSamplerRelease(envSampler_);
+
+    if (mainPipelineLayout_) wgpuPipelineLayoutRelease(mainPipelineLayout_);
+    if (mainPipeline_) wgpuRenderPipelineRelease(mainPipeline_);
+    if (shadowPipelineLayout_) wgpuPipelineLayoutRelease(shadowPipelineLayout_);
+    if (shadowPipeline_) wgpuRenderPipelineRelease(shadowPipeline_);
+    if (envPipelineLayout_) wgpuPipelineLayoutRelease(envPipelineLayout_);
+    if (envPipeline_) wgpuRenderPipelineRelease(envPipeline_);
+    if (genMipmapPipelineLayout_) wgpuPipelineLayoutRelease(genMipmapPipelineLayout_);
+    if (genMipmapPipeline_) wgpuComputePipelineRelease(genMipmapPipeline_);
+    if (genMipmapSRGBPipeline_) wgpuComputePipelineRelease(genMipmapSRGBPipeline_);
+    if (genMipmapEnvPipelineLayout_) wgpuPipelineLayoutRelease(genMipmapEnvPipelineLayout_);
+    if (genMipmapEnvPipeline_) wgpuComputePipelineRelease(genMipmapEnvPipeline_);
+    if (blurShadowPipelineLayout_) wgpuPipelineLayoutRelease(blurShadowPipelineLayout_);
+    if (blurShadowXPipeline_) wgpuComputePipelineRelease(blurShadowXPipeline_);
+    if (blurShadowYPipeline_) wgpuComputePipelineRelease(blurShadowYPipeline_);
+    if (simulateClothPipelineLayout_) wgpuPipelineLayoutRelease(simulateClothPipelineLayout_);
+    if (simulateClothPipeline_) wgpuComputePipelineRelease(simulateClothPipeline_);
+    if (simulateClothCopyPipeline_) wgpuComputePipelineRelease(simulateClothCopyPipeline_);
+
+    if (cameraUniformBuffer_) wgpuBufferRelease(cameraUniformBuffer_);
+    if (objectUniformBuffer_) wgpuBufferRelease(objectUniformBuffer_);
+    if (lightsUniformBuffer_) wgpuBufferRelease(lightsUniformBuffer_);
+    if (clothSettingsUniformBuffer_) wgpuBufferRelease(clothSettingsUniformBuffer_);
+    if (pointLightsBuffer_) wgpuBufferRelease(pointLightsBuffer_);
+
+    if (stubEnvTexture_) wgpuTextureRelease(stubEnvTexture_);
+    if (envTexture_) wgpuTextureRelease(envTexture_);
+    if (envTextureView_) wgpuTextureViewRelease(envTextureView_);
+
+    if (emptyBindGroup_) wgpuBindGroupRelease(emptyBindGroup_);
+    if (cameraBindGroup_) wgpuBindGroupRelease(cameraBindGroup_);
+    if (objectBindGroup_) wgpuBindGroupRelease(objectBindGroup_);
+    if (lightsBindGroup_) wgpuBindGroupRelease(lightsBindGroup_);
+    if (blurShadowXBindGroup_) wgpuBindGroupRelease(blurShadowXBindGroup_);
+    if (blurShadowYBindGroup_) wgpuBindGroupRelease(blurShadowYBindGroup_);
+
+    if (frameTexture_) wgpuTextureRelease(frameTexture_);
+    if (frameTextureView_) wgpuTextureViewRelease(frameTextureView_);
+    if (depthTexture_) wgpuTextureRelease(depthTexture_);
+    if (depthTextureView_) wgpuTextureViewRelease(depthTextureView_);
+
+    if (whiteTexture_) wgpuTextureRelease(whiteTexture_);
+
 }
 
 void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
@@ -291,6 +359,7 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
         }
 
         wgpuComputePassEncoderEnd(computePass);
+        wgpuComputePassEncoderRelease(computePass);
 
         // Bind groups should live as long as the compute pass lives,
         // so we defer it's release until the compute pass ends
@@ -299,12 +368,15 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
 
         WGPUCommandBuffer commandBuffer = commandEncoderFinish(commandEncoder);
 
+        wgpuCommandEncoderRelease(commandEncoder);
+
         // This is probably a bug in wgpu, but submitting a compute pass
         // in a separate thread causes GPU hangs or device loss, see
         // https://github.com/gfx-rs/wgpu/issues/4877
         renderQueue_.push([this, commandBuffer]
         {
             wgpuQueueSubmit(queue_, 1, &commandBuffer);
+            wgpuCommandBufferRelease(commandBuffer);
         });
 
         WGPUTextureViewDescriptor textureViewDescriptor;
@@ -842,6 +914,7 @@ void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, C
     }
 
     wgpuComputePassEncoderEnd(computePass);
+    wgpuComputePassEncoderRelease(computePass);
 
     auto commandBuffer = commandEncoderFinish(commandEncoder);
     wgpuQueueSubmit(queue_, 1, &commandBuffer);
@@ -1206,6 +1279,7 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
     }
 
     wgpuComputePassEncoderEnd(computePass);
+    wgpuComputePassEncoderRelease(computePass);
 
     // Bind groups should live as long as the compute pass lives,
     // so we defer it's release until the compute pass ends
