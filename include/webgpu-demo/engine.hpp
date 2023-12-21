@@ -36,6 +36,7 @@ struct Engine
         bool paused;
         glm::vec3 shockCenter;
         float shockDistance;
+        float dt;
     };
 
     void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);

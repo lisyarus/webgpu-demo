@@ -63,6 +63,11 @@ struct LightsUniform
     float envIntensity;
 };
 
+struct ClothSettingsUniform
+{
+    float dt;
+};
+
 static constexpr std::size_t CLOTH_EDGES_PER_VERTEX = 8;
 
 glm::mat4 glToVkProjection(glm::mat4 matrix);

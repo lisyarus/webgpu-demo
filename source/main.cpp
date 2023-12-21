@@ -153,6 +153,7 @@ int main()
         settings.paused = paused;
         settings.shockCenter = shockCenter;
         settings.shockDistance = shockDistance;
+        settings.dt = dt;
 
         engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings);
 

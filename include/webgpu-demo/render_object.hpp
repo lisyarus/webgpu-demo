@@ -81,7 +81,7 @@ struct RenderObject
     WGPUBindGroup clothBindGroup = nullptr;
 
     void createTexturesBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUSampler sampler);
-    void createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout layout);
+    void createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUBuffer settingsBuffer);
 
     ~RenderObject();
 };

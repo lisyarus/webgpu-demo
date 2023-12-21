@@ -420,6 +420,10 @@ struct ClothEdge {
     id : u32,
 }
 
+struct ClothSettings {
+    dt : f32,
+}
+
 struct Camera {
     viewProjection : mat4x4f,
     viewProjectionInverse : mat4x4f,
@@ -430,18 +434,18 @@ struct Camera {
 @group(0) @binding(0) var<storage, read_write> vertices : array<Vertex>;
 @group(0) @binding(1) var<storage, read_write> clothVertices : array<ClothVertex>;
 @group(0) @binding(2) var<storage, read> clothEdges : array<ClothEdge>;
+@group(0) @binding(3) var<uniform> settings : ClothSettings;
 
 @group(1) @binding(0) var<uniform> camera: Camera;
 
 const CLOTH_EDGES_PER_VERTEX = 8u;
-const DT = 0.01;
-const SPRING_FORCE = 200.0;
+const SPRING_FORCE = 20000.0;
 const MASS = 0.1;
-const GRAVITY = 0.5;
+const GRAVITY = 10.0;
 const DAMPING = 0.04;
 const SMOOTHING = 10.0;
 const FRICTION = 1.0;
-const SHOCK = 0.2;
+const SHOCK = 20.0;
 
 fn getPosition(id : u32) -> vec3f {
     return vec3f(vertices[id].data[0], vertices[id].data[1], vertices[id].data[2]);
@@ -477,7 +481,7 @@ fn collideCamera(position : vec3f, velocity : vec3f, radius : f32) -> CollideRes
     } else {
         let n = delta / distance;
         let newPosition = camera.position + n * radius;
-        let newVelocity = (velocity - n * dot(velocity, n)) * exp(- FRICTION * DT);
+        let newVelocity = (velocity - n * dot(velocity, n)) * exp(- FRICTION * settings.dt);
         return CollideResult(newPosition, newVelocity);
     }
 }
@@ -515,10 +519,10 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
         avgVelocity /= f32(edgeCount);
 
-        let newVelocity = (currentVelocity + force * DT / MASS) * exp(- DAMPING * DT);
-        let smoothedVelocity = mix(avgVelocity, newVelocity, exp(- SMOOTHING * DT));
+        let newVelocity = (currentVelocity + force * settings.dt / MASS) * exp(- DAMPING * settings.dt);
+        let smoothedVelocity = mix(avgVelocity, newVelocity, exp(- SMOOTHING * settings.dt));
 
-        let collision = collideCamera(currentPosition + smoothedVelocity * DT, smoothedVelocity, 0.5);
+        let collision = collideCamera(currentPosition + smoothedVelocity * settings.dt, smoothedVelocity, 0.5);
 
         clothVertices[id.x].velocity = collision.velocity;
         clothVertices[id.x].newPosition = collision.position;
@@ -1008,7 +1012,7 @@ WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device)
 
 WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device)
 {
-    WGPUBindGroupLayoutEntry entries[3];
+    WGPUBindGroupLayoutEntry entries[4];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -1064,10 +1068,28 @@ WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device)
     entries[2].storageTexture.format = WGPUTextureFormat_Undefined;
     entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
+    entries[3].nextInChain = nullptr;
+    entries[3].binding = 3;
+    entries[3].visibility = WGPUShaderStage_Compute;
+    entries[3].buffer.nextInChain = nullptr;
+    entries[3].buffer.type = WGPUBufferBindingType_Uniform;
+    entries[3].buffer.hasDynamicOffset = false;
+    entries[3].buffer.minBindingSize = sizeof(ClothSettingsUniform);
+    entries[3].sampler.nextInChain = nullptr;
+    entries[3].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[3].texture.nextInChain = nullptr;
+    entries[3].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[3].texture.multisampled = false;
+    entries[3].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[3].storageTexture.nextInChain = nullptr;
+    entries[3].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[3].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[3].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
     WGPUBindGroupLayoutDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.entryCount = 3;
+    descriptor.entryCount = 4;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);

@@ -94,9 +94,9 @@ void RenderObject::createTexturesBindGroup(WGPUDevice device, WGPUBindGroupLayou
             wgpuTextureViewRelease(entry.textureView);
 }
 
-void RenderObject::createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout layout)
+void RenderObject::createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUBuffer settingsBuffer)
 {
-    WGPUBindGroupEntry entries[3];
+    WGPUBindGroupEntry entries[4];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -122,11 +122,19 @@ void RenderObject::createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout l
     entries[2].sampler = nullptr;
     entries[2].textureView = common->createTextureView(textures.normalTextureId, false);
 
+    entries[3].nextInChain = nullptr;
+    entries[3].binding = 3;
+    entries[3].buffer = settingsBuffer;
+    entries[3].offset = 0;
+    entries[3].size = sizeof(ClothSettingsUniform);
+    entries[3].sampler = nullptr;
+    entries[3].textureView = nullptr;
+
     WGPUBindGroupDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.layout = layout;
-    descriptor.entryCount = 3;
+    descriptor.entryCount = 4;
     descriptor.entries = entries;
 
     clothBindGroup = wgpuDeviceCreateBindGroup(device, &descriptor);

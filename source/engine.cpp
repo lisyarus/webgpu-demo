@@ -85,6 +85,7 @@ private:
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
     WGPUBuffer lightsUniformBuffer_;
+    WGPUBuffer clothSettingsUniformBuffer_;
 
     WGPUTexture stubEnvTexture_;
     WGPUTexture envTexture_;
@@ -184,6 +185,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
+    , clothSettingsUniformBuffer_(createUniformBuffer(device_, sizeof(ClothSettingsUniform)))
 
     // Environment map textures and views
     , stubEnvTexture_(createStubEnvTexture(device_, queue_))
@@ -792,7 +794,7 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
     for (auto & renderObject : result)
         if (renderObject->cloth)
-            renderObject->createClothBindGroup(device_, simulateClothBindGroupLayout_);
+            renderObject->createClothBindGroup(device_, simulateClothBindGroupLayout_, clothSettingsUniformBuffer_);
 
     for (std::uint32_t i = 0; i < common->textures.size(); ++i)
         loaderQueue_.push([this, common, i]{ loadTexture(*common->textures[i]); });
@@ -807,6 +809,12 @@ void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, C
         cameraUniform.position = camera.position();
         cameraUniform.shock = glm::vec4(settings.shockCenter, settings.shockDistance);
         wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(cameraUniform));
+    }
+
+    {
+        ClothSettingsUniform settingsUniform;
+        settingsUniform.dt = std::min(0.001f, settings.dt / iterations);
+        wgpuQueueWriteBuffer(queue_, clothSettingsUniformBuffer_, 0, &settingsUniform, sizeof(settingsUniform));
     }
 
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
