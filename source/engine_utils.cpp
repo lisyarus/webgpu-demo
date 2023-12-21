@@ -21,6 +21,7 @@ struct Camera {
     viewProjectionInverse : mat4x4f,
     position : vec3f,
     shock : vec4f,
+    time : f32,
 }
 
 struct Object {
@@ -199,6 +200,92 @@ fn computeLighting(
     return material * lightness * lightIntensity;
 }
 
+fn hash(p : vec3f) -> vec3f
+{
+    let q = vec3f(
+        dot(p, vec3f(127.1, 311.7, 412.3)),
+        dot(p, vec3f(269.5, 183.3, 112.5)),
+        dot(p, vec3f(351.1, 126.3, 256.1))
+    );
+    return fract(sin(q)*43758.5453123);
+}
+
+fn noise(p : vec3f) -> f32
+{
+    let i = vec3i(floor(p));
+
+    var v : array<array<array<f32, 2>, 2>, 2>;
+    for (var x = 0; x < 2; x += 1) {
+        for (var y = 0; y < 2; y += 1) {
+            for (var z = 0; z < 2; z += 1) {
+                let q = vec3f(i + vec3i(x, y, z));
+                let g = hash(q);
+                let d = p - q;
+                v[x][y][z] = dot(g, d);
+            }
+        }
+    }
+
+    let s = p - vec3f(i);
+
+    for (var x = 0; x < 2; x += 1) {
+        for (var y = 0; y < 2; y += 1) {
+            v[x][y][0] = mix(v[x][y][0], v[x][y][1], s.z);
+        }
+    }
+
+    for (var x = 0; x < 2; x += 1) {
+        v[x][0][0] = mix(v[x][0][0], v[x][1][0], s.y);
+    }
+
+    v[0][0][0] = mix(v[0][0][0], v[1][0][0], s.x);
+
+    return 0.5 * (1.0 + v[0][0][0] * sqrt(4.0 / 3.0));
+}
+
+fn fractalNoise(p : vec3f) -> f32
+{
+    return (4.0 * noise(p * 25.0) + 2.0 * noise(p * 50.0) + 1.0 * noise(p * 100.0)) / 7.0;
+}
+
+fn volumetricLight(
+    lightPosition : vec3f,
+    lightIntensity : vec3f,
+    rayStart : vec3f,
+    rayEnd : vec3f,
+    radius : f32
+) -> vec3f
+{
+    let d = normalize(rayEnd - rayStart);
+    let r = rayStart - lightPosition;
+    let maxDist = length(rayEnd - rayStart);
+
+    // |s + t * d - p|^2 = r^2
+    // (s-p)^2 + 2t(s-p)d + t^2 d^2 - r^2 = 0
+
+    let rdotd = dot(r, d);
+
+    let D = rdotd * rdotd - (dot(r, r) - radius * radius);
+    if (D <= 0.0) {
+        return vec3f(0.0);
+    }
+
+    let tmin = clamp(- rdotd - sqrt(D), 0.0, maxDist);
+    let tmax = clamp(- rdotd + sqrt(D), 0.0, maxDist);
+    let N = 8;
+    let dt = (tmax - tmin) / f32(N);
+    var result = 0.0;
+    for (var i = 0; i < N; i += 1) {
+        let p = rayStart + (tmin + (f32(i) + 0.5) * dt) * d;
+        let v = fractalNoise(p * vec3f(1.0, 0.5, 1.0) + vec3f(0.0, - camera.time * 0.25, 0.0))
+            * pow(1.0 - length(p - lightPosition) / radius, 0.2);
+
+        result += max(0.0, 4.0 * (v - mix(0.5, 0.7, (p.y - lightPosition.y) / radius))) * dt;
+    }
+
+    return lightIntensity * result;
+}
+
 const ESM_FACTOR = 80.0;
 
 @fragment
@@ -238,9 +325,12 @@ fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -
         let light = pointLights[i];
         let direction = light.position - in.worldPosition;
         let distance = length(direction);
-        let attenuation = 1.0 / pow(1.0 + distance / 0.1, 2.0);
+        let radius = 0.1;
+        let attenuation = 1.0 / pow(1.0 + distance / radius, 2.0);
 
         litColor += computeLighting(normal, baseColor, metallic, roughness, viewDirection, direction / distance, light.intensity * attenuation);
+
+        litColor += volumetricLight(light.position, light.intensity, camera.position, in.worldPosition, 2.0 * radius);
     }
 
     let shockDistance = length(camera.shock.xyz - in.worldPosition);
@@ -1547,7 +1637,8 @@ WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
 }
 
 WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
-    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView, WGPUBuffer pointLightsBuffer)
+    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView,
+    WGPUBuffer pointLightsBuffer)
 {
     WGPUBindGroupEntry entries[6];
 

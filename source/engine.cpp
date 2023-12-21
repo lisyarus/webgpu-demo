@@ -117,13 +117,14 @@ private:
     void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
-    void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer);
+    void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer, glm::ivec2 const & viewport);
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
     int updatePointLightsBuffer(std::vector<RenderObjectPtr> const & objects);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
     void updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings, int pointLightCount);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
+    void recreateLightsBindGroup();
     void loaderThreadMain();
 };
 
@@ -199,7 +200,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
-    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_))
+    , lightsBindGroup_(nullptr)
     , blurShadowXBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapView_, shadowMapAuxView_))
     , blurShadowYBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapAuxView_, shadowMapView_))
 
@@ -211,7 +212,9 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
 
     // Extra textures
     , whiteTexture_(createWhiteTexture(device_, queue_))
-{}
+{
+    recreateLightsBindGroup();
+}
 
 Engine::Impl::~Impl()
 {
@@ -350,7 +353,7 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
             if (lightsBindGroup_)
                 wgpuBindGroupRelease(lightsBindGroup_);
 
-            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_);
+            recreateLightsBindGroup();
         });
     });
 }
@@ -385,7 +388,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     blurShadow();
 
-    updateCameraBuffer(camera, settings, cameraUniformBuffer_);
+    updateCameraBuffer(camera, settings, cameraUniformBuffer_, {wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
     updateLightsUniformBuffer(shadowProjection, settings, pointLightCount);
 
     renderEnv(targetView);
@@ -1042,13 +1045,14 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTe
     }
 }
 
-void Engine::Impl::updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer)
+void Engine::Impl::updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer, glm::ivec2 const & viewport)
 {
     CameraUniform cameraUniform;
     cameraUniform.viewProjection = glToVkProjection(camera.viewProjectionMatrix());
     cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
     cameraUniform.position = camera.position();
     cameraUniform.shock = glm::vec4(settings.shockCenter, settings.shockDistance);
+    cameraUniform.time = settings.time;
 
     wgpuQueueWriteBuffer(queue_, buffer, 0, &cameraUniform, sizeof(CameraUniform));
 }
@@ -1096,7 +1100,7 @@ int Engine::Impl::updatePointLightsBuffer(std::vector<RenderObjectPtr> const & o
     {
         wgpuBufferRelease(pointLightsBuffer_);
         pointLightsBuffer_ = createStorageBuffer(device_, lights.size() * sizeof(lights[0]));
-        lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_);
+        recreateLightsBindGroup();
     }
 
     wgpuQueueWriteBuffer(queue_, pointLightsBuffer_, 0, lights.data(), lights.size() * sizeof(lights[0]));
@@ -1256,6 +1260,15 @@ void Engine::Impl::loadTexture(RenderObjectCommon::TextureInfo & textureInfo)
             if (auto object = user.lock())
                 object->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
         });
+}
+
+void Engine::Impl::recreateLightsBindGroup()
+{
+    if (lightsBindGroup_)
+        wgpuBindGroupRelease(lightsBindGroup_);
+
+    lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_,
+        shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_);
 }
 
 void Engine::Impl::loaderThreadMain()

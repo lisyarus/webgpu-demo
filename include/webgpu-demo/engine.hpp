@@ -36,6 +36,7 @@ struct Engine
         bool paused;
         glm::vec3 shockCenter;
         float shockDistance;
+        float time;
         float dt;
         bool gravity;
     };

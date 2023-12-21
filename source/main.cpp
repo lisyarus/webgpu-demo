@@ -160,6 +160,7 @@ int main()
         settings.paused = paused;
         settings.shockCenter = shockCenter;
         settings.shockDistance = shockDistance;
+        settings.time = time;
         settings.dt = dt;
         settings.gravity = gravity;
 
