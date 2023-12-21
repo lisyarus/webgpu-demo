@@ -327,9 +327,6 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
             envTexture_ = texture;
             envTextureView_ = textureView;
 
-            if (lightsBindGroup_)
-                wgpuBindGroupRelease(lightsBindGroup_);
-
             recreateLightsBindGroup();
         });
     });
