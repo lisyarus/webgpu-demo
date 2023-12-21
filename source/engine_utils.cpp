@@ -163,7 +163,7 @@ fn specularVHelper(halfway : vec3f, normal : vec3f, alpha2 : f32, v : vec3f) -> 
 const ESM_FACTOR = 80.0;
 
 @fragment
-fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
+fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -> @location(0) vec4f {
     let baseColorSample = textureSample(baseColorTexture, textureSampler, in.texcoord) * object.baseColorFactor;
 
     let baseColor = baseColorSample.rgb;
@@ -173,7 +173,7 @@ fn fragmentMain(in : VertexOutput) -> @location(0) vec4f {
     tbn[0] = normalize(in.tangent.xyz - tbn[2] * dot(in.tangent.xyz, tbn[2]));
     tbn[1] = cross(tbn[2], tbn[0]) * in.tangent.w;
 
-    let normal = tbn * normalize(2.0 * textureSample(normalTexture, textureSampler, in.texcoord).rgb - vec3(1.0));
+    let normal = tbn * normalize(2.0 * textureSample(normalTexture, textureSampler, in.texcoord).rgb - vec3(1.0)) * select(-1.0, 1.0, front_facing);
 
     let materialSample = textureSample(metallicRoughnessTexture, textureSampler, in.texcoord);
 
@@ -1158,7 +1158,7 @@ WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipe
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
     descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
     descriptor.primitive.frontFace = WGPUFrontFace_CCW;
-    descriptor.primitive.cullMode = WGPUCullMode_Back;
+    descriptor.primitive.cullMode = WGPUCullMode_None;
     descriptor.depthStencil = &depthStencilState;
     descriptor.multisample.nextInChain = nullptr;
     descriptor.multisample.count = 4;
@@ -1234,7 +1234,7 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
     descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
     descriptor.primitive.frontFace = WGPUFrontFace_CCW;
-    descriptor.primitive.cullMode = WGPUCullMode_Back;
+    descriptor.primitive.cullMode = WGPUCullMode_None;
     descriptor.depthStencil = &depthStencilState;
     descriptor.multisample.nextInChain = nullptr;
     descriptor.multisample.count = 1;
