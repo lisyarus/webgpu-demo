@@ -287,6 +287,24 @@ fn volumetricLight(
     return lightIntensity * result;
 }
 
+fn cheapNoise(p : vec3f) -> f32
+{
+    return sin(dot(p, vec3f(3.61, 5.12, 4.36)));
+}
+
+fn randomizeLightPosition(p : vec3f) -> vec3f
+{
+    let t = 5.0 * camera.time;
+    let s = 0.02;
+
+    var q = p;
+    q.x += s * cheapNoise(p + vec3f(t, 0.0, 0.0));
+    q.y += s * cheapNoise(p + vec3f(0.0, t, 0.0));
+    q.z += s * cheapNoise(p + vec3f(0.0, 0.0, t));
+
+    return q;
+}
+
 const ESM_FACTOR = 80.0;
 
 @fragment
@@ -324,7 +342,8 @@ fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -
 
     for (var i = 0u; i < lights.pointLightCount; i += 1u) {
         let light = pointLights[i];
-        let direction = light.position - in.worldPosition;
+        let position = randomizeLightPosition(light.position);
+        let direction = position - in.worldPosition;
         let distance = length(direction);
         let radius = 0.1;
         let attenuation = 1.0 / pow(1.0 + distance / radius, 2.0);
