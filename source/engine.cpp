@@ -814,6 +814,7 @@ void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, C
     {
         ClothSettingsUniform settingsUniform;
         settingsUniform.dt = std::min(0.001f, settings.dt / iterations);
+        settingsUniform.gravity = settings.gravity ? 10.f : 0.f;
         wgpuQueueWriteBuffer(queue_, clothSettingsUniformBuffer_, 0, &settingsUniform, sizeof(settingsUniform));
     }
 

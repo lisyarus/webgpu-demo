@@ -422,6 +422,7 @@ struct ClothEdge {
 
 struct ClothSettings {
     dt : f32,
+    gravity : f32,
 }
 
 struct Camera {
@@ -441,7 +442,6 @@ struct Camera {
 const CLOTH_EDGES_PER_VERTEX = 8u;
 const SPRING_FORCE = 20000.0;
 const MASS = 0.1;
-const GRAVITY = 10.0;
 const DAMPING = 0.04;
 const SMOOTHING = 10.0;
 const FRICTION = 1.0;
@@ -507,7 +507,7 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
     }
 
     if (edgeCount > 0) {
-        force += vec3f(0.0, - GRAVITY * MASS, 0.0);
+        force += vec3f(0.0, - settings.gravity * MASS, 0.0);
 
         let shockDelta = currentPosition - camera.shock.xyz;
         let shockDistance = length(shockDelta);

@@ -36,6 +36,7 @@ int main()
     bool paused = true;
     bool day = true;
     bool vsync = true;
+    bool gravity = true;
 
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
@@ -89,6 +90,8 @@ int main()
                 shockCenter = camera.position();
                 shockDistance = 0.f;
             }
+            if (event->key.keysym.scancode == SDL_SCANCODE_G)
+                gravity ^= true;
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);
@@ -154,6 +157,7 @@ int main()
         settings.shockCenter = shockCenter;
         settings.shockDistance = shockDistance;
         settings.dt = dt;
+        settings.gravity = gravity;
 
         engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings);
 

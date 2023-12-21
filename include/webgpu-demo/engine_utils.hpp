@@ -66,6 +66,7 @@ struct LightsUniform
 struct ClothSettingsUniform
 {
     float dt;
+    float gravity;
 };
 
 static constexpr std::size_t CLOTH_EDGES_PER_VERTEX = 8;
