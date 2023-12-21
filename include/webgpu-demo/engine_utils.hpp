@@ -61,6 +61,16 @@ struct LightsUniform
     float padding2[1];
     glm::vec3 sunIntensity;
     float envIntensity;
+    std::uint32_t pointLightCount;
+    float padding3[3];
+};
+
+struct PointLight
+{
+    glm::vec3 position;
+    float padding1[1];
+    glm::vec3 intensity;
+    float padding2[1];
 };
 
 struct ClothSettingsUniform
@@ -107,12 +117,13 @@ WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineL
 WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
+WGPUBuffer createStorageBuffer(WGPUDevice device, std::uint64_t size);
 
 WGPUBindGroup createEmptyBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout);
 WGPUBindGroup createCameraBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer);
 WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer);
 WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
-    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView);
+    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView, WGPUBuffer pointLightsBuffer);
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 

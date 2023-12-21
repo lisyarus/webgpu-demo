@@ -66,6 +66,15 @@ namespace glTF
                 for (int i = 0; i < 3; ++i)
                     node.scale[i] = scale[i].GetFloat();
             }
+
+            if (nodeIn.HasMember("extensions"))
+            {
+                auto const & extensions = nodeIn["extensions"];
+                if (extensions.HasMember("KHR_lights_punctual"))
+                {
+                    node.light = extensions["KHR_lights_punctual"]["light"].GetUint();
+                }
+            }
         }
 
         if (document.HasMember("meshes"))
@@ -217,6 +226,25 @@ namespace glTF
 
             buffer.uri = bufferIn["uri"].GetString();
             buffer.byteLength = bufferIn["byteLength"].GetUint();
+        }
+
+        if (document.HasMember("extensions"))
+        {
+            auto const & extensions = document["extensions"];
+
+            if (extensions.HasMember("KHR_lights_punctual"))
+            {
+                for (auto const & lightIn : extensions["KHR_lights_punctual"]["lights"].GetArray())
+                {
+                    auto & light = result.lights.emplace_back();
+
+                    auto const & colorIn = lightIn["color"].GetArray();
+                    light.intensity.r = colorIn[0].GetFloat();
+                    light.intensity.g = colorIn[1].GetFloat();
+                    light.intensity.b = colorIn[2].GetFloat();
+                    light.intensity *= lightIn["intensity"].GetFloat();
+                }
+            }
         }
 
         return result;

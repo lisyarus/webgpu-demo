@@ -15,6 +15,10 @@ int main()
     Engine engine(application.device(), application.queue());
     engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
     auto renderObjects = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza.gltf");
+    {
+        auto lights = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza-lights.gltf");
+        renderObjects.insert(renderObjects.end(), lights.begin(), lights.end());
+    }
 
     auto sceneBbox = engine.bbox(renderObjects);
 
@@ -146,7 +150,7 @@ int main()
             settings =
             {
                 .skyColor = {0.0f, 0.0f, 0.001f},
-                .ambientLight = {0.05f, 0.1f, 0.15f},
+                .ambientLight = {0.025f, 0.05f, 0.075f},
                 .envIntensity = 0.05f,
                 .sunDirection = glm::normalize(glm::vec3{std::cos(lightPhase), 2.f, std::sin(lightPhase)}),
                 .sunIntensity = {1.f, 2.f, 3.f},

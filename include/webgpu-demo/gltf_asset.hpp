@@ -117,6 +117,11 @@ namespace glTF
         std::vector<Primitive> primitives;
     };
 
+    struct Light
+    {
+        glm::vec3 intensity;
+    };
+
     struct Node
     {
         std::string name;
@@ -127,6 +132,7 @@ namespace glTF
 
         std::vector<std::uint32_t> children;
         std::optional<std::uint32_t> mesh;
+        std::optional<std::uint32_t> light;
     };
 
     struct Asset
@@ -136,6 +142,7 @@ namespace glTF
         std::vector<Material> materials;
         std::vector<Texture> textures;
         std::vector<Image> images;
+        std::vector<Light> lights;
         std::vector<Accessor> accessors;
         std::vector<BufferView> bufferViews;
         std::vector<Buffer> buffers;

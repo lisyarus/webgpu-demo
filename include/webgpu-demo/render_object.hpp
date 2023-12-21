@@ -80,6 +80,14 @@ struct RenderObject
     WGPUBindGroup texturesBindGroup = nullptr;
     WGPUBindGroup clothBindGroup = nullptr;
 
+    struct Light
+    {
+        glm::vec3 position;
+        glm::vec3 intensity;
+    };
+
+    std::optional<Light> light;
+
     void createTexturesBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUSampler sampler);
     void createClothBindGroup(WGPUDevice device, WGPUBindGroupLayout layout, WGPUBuffer settingsBuffer);
 

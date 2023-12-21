@@ -37,6 +37,12 @@ struct Lights {
     sunDirection : vec3f,
     sunIntensity : vec3f,
     envIntensity : f32,
+    pointLightCount : u32,
+}
+
+struct PointLight {
+    position : vec3f,
+    intensity : vec3f,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -53,6 +59,7 @@ struct Lights {
 @group(3) @binding(2) var shadowMapTexture: texture_2d<f32>;
 @group(3) @binding(3) var envSampler: sampler;
 @group(3) @binding(4) var envMapTexture : texture_2d<f32>;
+@group(3) @binding(5) var<storage, read> pointLights : array<PointLight>;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -160,6 +167,38 @@ fn specularVHelper(halfway : vec3f, normal : vec3f, alpha2 : f32, v : vec3f) -> 
     return step(0.0, hdotv) / (abs(ndotv) + sqrt(mix(ndotv * ndotv, 1.0, alpha2)));
 }
 
+// The BRDF is implemented as described in glTF 2.0 specification:
+// https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
+fn computeLighting(
+    normal : vec3f,
+    baseColor : vec3f,
+    metallic : f32,
+    roughness : f32,
+    viewDirection : vec3f,
+    lightDirection : vec3f,
+    lightIntensity : vec3f
+) -> vec3f
+{
+    let halfway = normalize(lightDirection + viewDirection);
+    let reflected = reflect(-viewDirection, normal);
+
+    let fresnelFactor = pow(1.0 - abs(dot(viewDirection, halfway)), 5.0);
+    let alpha = roughness * roughness;
+    let alpha2 = alpha * alpha;
+
+    let diffuse = (1.0 / PI) * baseColor;
+    let specular = specularVHelper(halfway, normal, alpha2, lightDirection)
+        * specularVHelper(halfway, normal, alpha2, viewDirection)
+        * specularD(halfway, normal, alpha2);
+    let dielectric = mix(diffuse, vec3f(specular), mix(fresnelFactor, 1.0, 0.04));
+    let metal = specular * mix(vec3f(fresnelFactor), vec3f(1.0), baseColor);
+    let material = mix(dielectric, metal, metallic);
+
+    let lightness = max(0.0, dot(normal, lightDirection));
+
+    return material * lightness * lightIntensity;
+}
+
 const ESM_FACTOR = 80.0;
 
 @fragment
@@ -181,24 +220,10 @@ fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -
     let roughness = materialSample.g * object.roughnessFactor;
 
     let viewDirection = normalize(camera.position - in.worldPosition);
-    let halfway = normalize(lights.sunDirection + viewDirection);
-    let reflected = reflect(-viewDirection, normal);
 
-    let fresnelFactor = pow(1.0 - abs(dot(viewDirection, halfway)), 5.0);
-    let alpha = roughness * roughness;
-    let alpha2 = alpha * alpha;
+    var litColor = lights.ambientLight * baseColor;
 
-    // The BRDF is implemented as described in glTF 2.0 specification:
-    // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
-    let diffuse = (1.0 / PI) * baseColor;
-    let specular = specularVHelper(halfway, normal, alpha2, lights.sunDirection)
-        * specularVHelper(halfway, normal, alpha2, viewDirection)
-        * specularD(halfway, normal, alpha2);
-    let dielectric = mix(diffuse, vec3f(specular), mix(fresnelFactor, 1.0, 0.04));
-    let metal = specular * mix(vec3f(fresnelFactor), vec3f(1.0), baseColor);
-    let material = mix(dielectric, metal, metallic);
-
-    let lightness = max(0.0, dot(normal, lights.sunDirection));
+    // Sun contribution
 
     let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
     let shadowPositionNdc = perspectiveDivide(shadowPositionClip);
@@ -207,13 +232,22 @@ fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -
     let shadowSample = textureSample(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5)).r;
     let shadowFactor = clamp((exp(- ESM_FACTOR * shadowPositionNdc.z) * shadowSample - shadowThreshold) / (1.0 - shadowThreshold), 0.0, 1.0);
 
-    let outColor = lights.ambientLight * baseColor + material * lightness * shadowFactor * lights.sunIntensity;
+    litColor += computeLighting(normal, baseColor, metallic, roughness, viewDirection, lights.sunDirection, shadowFactor * lights.sunIntensity);
+
+    for (var i = 0u; i < lights.pointLightCount; i += 1u) {
+        let light = pointLights[i];
+        let direction = light.position - in.worldPosition;
+        let distance = length(direction);
+        let attenuation = 1.0 / pow(1.0 + distance / 0.1, 2.0);
+
+        litColor += computeLighting(normal, baseColor, metallic, roughness, viewDirection, direction / distance, light.intensity * attenuation);
+    }
 
     let shockDistance = length(camera.shock.xyz - in.worldPosition);
     let shockD = camera.shock.w - shockDistance;
     let shockFactor = exp(- shockD * shockD * 10.0) + 0.04 * step(0.0, shockD) * exp(- shockD * shockD * 0.4) * (0.5 + 0.5 * sin(shockD * 16.0));
 
-    let shockColor = mix(outColor, lights.sunIntensity * 0.3, shockFactor);
+    let shockColor = mix(litColor, lights.sunIntensity * 0.3, shockFactor);
 
     return vec4f(tonemap(shockColor), baseColorSample.a);
 }
@@ -762,7 +796,7 @@ WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device)
 
 WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
 {
-    WGPUBindGroupLayoutEntry entries[5];
+    WGPUBindGroupLayoutEntry entries[6];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -854,10 +888,28 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[4].storageTexture.format = WGPUTextureFormat_Undefined;
     entries[4].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
+    entries[5].nextInChain = nullptr;
+    entries[5].binding = 5;
+    entries[5].visibility = WGPUShaderStage_Fragment;
+    entries[5].buffer.nextInChain = nullptr;
+    entries[5].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+    entries[5].buffer.hasDynamicOffset = false;
+    entries[5].buffer.minBindingSize = sizeof(PointLight);
+    entries[5].sampler.nextInChain = nullptr;
+    entries[5].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[5].texture.nextInChain = nullptr;
+    entries[5].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[5].texture.multisampled = false;
+    entries[5].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[5].storageTexture.nextInChain = nullptr;
+    entries[5].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[5].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[5].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
     WGPUBindGroupLayoutDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.entryCount = 5;
+    descriptor.entryCount = 6;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
@@ -1427,6 +1479,18 @@ WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
     return wgpuDeviceCreateBuffer(device, &descriptor);
 }
 
+WGPUBuffer createStorageBuffer(WGPUDevice device, std::uint64_t size)
+{
+    WGPUBufferDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Storage;
+    descriptor.size = size;
+    descriptor.mappedAtCreation = false;
+
+    return wgpuDeviceCreateBuffer(device, &descriptor);
+}
+
 WGPUBindGroup createEmptyBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout)
 {
     WGPUBindGroupDescriptor descriptor;
@@ -1483,9 +1547,9 @@ WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
 }
 
 WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
-    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView)
+    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView, WGPUBuffer pointLightsBuffer)
 {
-    WGPUBindGroupEntry entries[5];
+    WGPUBindGroupEntry entries[6];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -1527,11 +1591,19 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     entries[4].sampler = nullptr;
     entries[4].textureView = envMapView;
 
+    entries[5].nextInChain = nullptr;
+    entries[5].binding = 5;
+    entries[5].buffer = pointLightsBuffer;
+    entries[5].offset = 0;
+    entries[5].size = wgpuBufferGetSize(pointLightsBuffer);
+    entries[5].sampler = nullptr;
+    entries[5].textureView = nullptr;
+
     WGPUBindGroupDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.layout = bindGroupLayout;
-    descriptor.entryCount = 5;
+    descriptor.entryCount = 6;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroup(device, &descriptor);

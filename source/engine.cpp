@@ -86,6 +86,7 @@ private:
     WGPUBuffer objectUniformBuffer_;
     WGPUBuffer lightsUniformBuffer_;
     WGPUBuffer clothSettingsUniformBuffer_;
+    WGPUBuffer pointLightsBuffer_;
 
     WGPUTexture stubEnvTexture_;
     WGPUTexture envTexture_;
@@ -118,9 +119,10 @@ private:
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
     void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer);
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
+    int updatePointLightsBuffer(std::vector<RenderObjectPtr> const & objects);
     glm::mat4 computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox);
     void updateCameraUniformBufferShadow(glm::mat4 const & shadowProjection);
-    void updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings);
+    void updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings, int pointLightCount);
     void loadTexture(RenderObjectCommon::TextureInfo & textureInfo);
     void loaderThreadMain();
 };
@@ -186,6 +188,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , objectUniformBuffer_(nullptr)
     , lightsUniformBuffer_(createUniformBuffer(device_, sizeof(LightsUniform)))
     , clothSettingsUniformBuffer_(createUniformBuffer(device_, sizeof(ClothSettingsUniform)))
+    , pointLightsBuffer_(createStorageBuffer(device_, 16 * sizeof(PointLight)))
 
     // Environment map textures and views
     , stubEnvTexture_(createStubEnvTexture(device_, queue_))
@@ -196,7 +199,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
     , cameraBindGroup_(createCameraBindGroup(device_, cameraBindGroupLayout_, cameraUniformBuffer_))
     , objectBindGroup_(nullptr)
-    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_))
+    , lightsBindGroup_(createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_))
     , blurShadowXBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapView_, shadowMapAuxView_))
     , blurShadowYBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapAuxView_, shadowMapView_))
 
@@ -347,7 +350,7 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
             if (lightsBindGroup_)
                 wgpuBindGroupRelease(lightsBindGroup_);
 
-            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_);
+            lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_);
         });
     });
 }
@@ -369,6 +372,8 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     updateObjectUniformBuffer(objects);
 
+    int pointLightCount = updatePointLightsBuffer(objects);
+
     simulateCloth(objects, camera, settings, settings.paused ? 0 : 16);
 
     WGPUTextureView targetView = createTextureView(target);
@@ -381,7 +386,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     blurShadow();
 
     updateCameraBuffer(camera, settings, cameraUniformBuffer_);
-    updateLightsUniformBuffer(shadowProjection, settings);
+    updateLightsUniformBuffer(shadowProjection, settings, pointLightCount);
 
     renderEnv(targetView);
     renderMain(objects, targetView);
@@ -410,10 +415,12 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
     std::vector<RenderObjectPtr> result;
 
     {
-        if (asset.buffers.size() != 1)
+        if (asset.buffers.size() > 1)
             throw std::runtime_error("Only 1 binary buffer is supported");
 
-        std::vector<char> assetBufferData = glTF::loadBuffer(assetPath, asset.buffers[0].uri);
+        std::vector<char> assetBufferData;
+        if (!asset.buffers.empty())
+            assetBufferData = glTF::loadBuffer(assetPath, asset.buffers[0].uri);
 
         std::vector<Vertex> vertices;
         std::vector<std::uint16_t> indices;
@@ -422,324 +429,342 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 
         for (auto const & node : asset.nodes)
         {
-            if (!node.mesh) continue;
-
             glm::mat4 nodeModelMatrix =
                 glm::scale(node.scale) *
                 glm::toMat4(node.rotation) *
                 glm::translate(node.translation);
 
-            auto const & mesh = asset.meshes[*node.mesh];
-
-            for (auto const & primitive : mesh.primitives)
+            if (node.light)
             {
-                if (!primitive.attributes.position) continue;
-                if (!primitive.attributes.normal) continue;
-                if (!primitive.attributes.tangent) continue;
-                if (!primitive.attributes.texcoord) continue;
-                if (!primitive.indices) continue;
-
-                if (primitive.mode != glTF::Primitive::Mode::Triangles) continue;
-
-                if (!primitive.material) continue;
-
-                auto const & positionAccessor = asset.accessors[*primitive.attributes.position];
-                auto const &   normalAccessor = asset.accessors[*primitive.attributes.normal];
-                auto const &  tangentAccessor = asset.accessors[*primitive.attributes.tangent];
-                auto const & texcoordAccessor = asset.accessors[*primitive.attributes.texcoord];
-                auto const &    indexAccessor = asset.accessors[*primitive.indices];
-
-                if (positionAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
-                if (  normalAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
-                if ( tangentAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
-                if (texcoordAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
-                if (   indexAccessor.componentType != glTF::Accessor::ComponentType::UnsignedShort) continue;
-
-                if (positionAccessor.type != glTF::Accessor::Type::Vec3) continue;
-                if (  normalAccessor.type != glTF::Accessor::Type::Vec3) continue;
-                if ( tangentAccessor.type != glTF::Accessor::Type::Vec4) continue;
-                if (texcoordAccessor.type != glTF::Accessor::Type::Vec2) continue;
-                if (   indexAccessor.type != glTF::Accessor::Type::Scalar) continue;
-
-                auto const & materialIn = asset.materials[*primitive.material];
-
                 auto & renderObject = result.emplace_back(std::make_shared<RenderObject>());
 
-                renderObject->common = common;
+                renderObject->common = nullptr;
 
-                renderObject->vertices.byteOffset = vertices.size() * sizeof(vertices[0]);
-                renderObject->vertices.byteLength = positionAccessor.count * sizeof(vertices[0]);
-                renderObject->vertices.count = positionAccessor.count;
-                renderObject->indices.byteOffset = indices.size() * sizeof(indices[0]);
-                renderObject->indices.byteLength = indexAccessor.count * sizeof(indices[0]);
-                renderObject->indices.count = indexAccessor.count;
-                renderObject->indexFormat = WGPUIndexFormat_Uint16;
+                renderObject->vertices.byteOffset = 0;
+                renderObject->vertices.byteLength = 0;
+                renderObject->vertices.count = 0;
+                renderObject->indices.byteOffset = 0;
+                renderObject->indices.byteLength = 0;
+                renderObject->indices.count = 0;
+                renderObject->indexFormat = WGPUIndexFormat_Undefined;
 
-                renderObject->uniforms.modelMatrix = glm::mat4(1.f);
-                renderObject->uniforms.baseColorFactor = materialIn.baseColorFactor;
-                renderObject->uniforms.metallicFactor = materialIn.metallicFactor;
-                renderObject->uniforms.roughnessFactor = materialIn.roughnessFactor;
-                renderObject->uniforms.emissiveFactor = materialIn.emissiveFactor;
+                renderObject->light = RenderObject::Light{node.translation, asset.lights[*node.light].intensity};
+            }
 
-                renderObject->textures.baseColorTextureId = materialIn.baseColorTexture;
-                renderObject->textures.metallicRoughnessTextureId = materialIn.metallicRoughnessTexture;
-                renderObject->textures.normalTextureId = materialIn.normalTexture;
+            if (node.mesh)
+            {
+                auto const & mesh = asset.meshes[*node.mesh];
 
-                if (materialIn.baseColorTexture)
+                for (auto const & primitive : mesh.primitives)
                 {
-                    auto & textureInfo = common->textures[*materialIn.baseColorTexture];
-                    textureInfo->users.push_back(renderObject);
-                    textureInfo->sRGB = true;
-                }
-                if (materialIn.metallicRoughnessTexture)
-                    common->textures[*materialIn.metallicRoughnessTexture]->users.push_back(renderObject);
-                if (materialIn.normalTexture)
-                    common->textures[*materialIn.normalTexture]->users.push_back(renderObject);
+                    if (!primitive.attributes.position) continue;
+                    if (!primitive.attributes.normal) continue;
+                    if (!primitive.attributes.tangent) continue;
+                    if (!primitive.attributes.texcoord) continue;
+                    if (!primitive.indices) continue;
 
-                auto const & positionBufferView = asset.bufferViews[positionAccessor.bufferView];
-                auto const &   normalBufferView = asset.bufferViews[  normalAccessor.bufferView];
-                auto const &  tangentBufferView = asset.bufferViews[ tangentAccessor.bufferView];
-                auto const & texcoordBufferView = asset.bufferViews[texcoordAccessor.bufferView];
-                auto const &    indexBufferView = asset.bufferViews[   indexAccessor.bufferView];
+                    if (primitive.mode != glTF::Primitive::Mode::Triangles) continue;
 
-                auto positionIterator = glTF::AccessorIterator<glm::vec3>(assetBufferData.data() + positionBufferView.byteOffset + positionAccessor.byteOffset, positionBufferView.byteStride);
-                auto normalIterator = glTF::AccessorIterator<glm::vec3>(assetBufferData.data() + normalBufferView.byteOffset + normalAccessor.byteOffset, normalBufferView.byteStride);
-                auto tangentIterator = glTF::AccessorIterator<glm::vec4>(assetBufferData.data() + tangentBufferView.byteOffset + tangentAccessor.byteOffset, tangentBufferView.byteStride);
-                auto texcoordIterator = glTF::AccessorIterator<glm::vec2>(assetBufferData.data() + texcoordBufferView.byteOffset + texcoordAccessor.byteOffset, texcoordBufferView.byteStride);
+                    if (!primitive.material) continue;
 
-                for (int i = 0; i < positionAccessor.count; ++i)
-                {
-                    vertices.push_back({
-                        *positionIterator++,
-                        *  normalIterator++,
-                        * tangentIterator++,
-                        *texcoordIterator++,
-                        glm::vec4(0.f, 0.f, 0.f, 1.f)
-                    });
+                    auto const & positionAccessor = asset.accessors[*primitive.attributes.position];
+                    auto const &   normalAccessor = asset.accessors[*primitive.attributes.normal];
+                    auto const &  tangentAccessor = asset.accessors[*primitive.attributes.tangent];
+                    auto const & texcoordAccessor = asset.accessors[*primitive.attributes.texcoord];
+                    auto const &    indexAccessor = asset.accessors[*primitive.indices];
 
-                    vertices.back().position = glm::vec3((nodeModelMatrix * glm::vec4(vertices.back().position, 1.f)));
-                    vertices.back().normal = glm::normalize(glm::vec3((nodeModelMatrix * glm::vec4(vertices.back().normal, 0.f))));
-                    vertices.back().tangent = glm::vec4(glm::normalize(glm::vec3((nodeModelMatrix * glm::vec4(glm::vec3(vertices.back().tangent), 0.f)))), vertices.back().tangent.w);
+                    if (positionAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                    if (  normalAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                    if ( tangentAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                    if (texcoordAccessor.componentType != glTF::Accessor::ComponentType::Float) continue;
+                    if (   indexAccessor.componentType != glTF::Accessor::ComponentType::UnsignedShort) continue;
 
-                    renderObject->bbox.expand(vertices.back().position);
-                }
+                    if (positionAccessor.type != glTF::Accessor::Type::Vec3) continue;
+                    if (  normalAccessor.type != glTF::Accessor::Type::Vec3) continue;
+                    if ( tangentAccessor.type != glTF::Accessor::Type::Vec4) continue;
+                    if (texcoordAccessor.type != glTF::Accessor::Type::Vec2) continue;
+                    if (   indexAccessor.type != glTF::Accessor::Type::Scalar) continue;
 
-                auto indexIterator = glTF::AccessorIterator<std::uint16_t>(assetBufferData.data() + indexBufferView.byteOffset + indexAccessor.byteOffset, indexBufferView.byteStride);
-                for (int i = 0; i < indexAccessor.count; ++i)
-                    indices.emplace_back(*indexIterator++);
+                    auto const & materialIn = asset.materials[*primitive.material];
 
-                if (materialIn.cloth)
-                {
-                    // Make sure vertex count for cloth simulation is a multiple of workgroup size
-                    int const vertexCountExtra = (32 - (renderObject->vertices.count % 32)) % 32;
-                    int const vertexCount = renderObject->vertices.count + vertexCountExtra;
+                    auto & renderObject = result.emplace_back(std::make_shared<RenderObject>());
 
-                    for (int i = 0; i < vertexCountExtra; ++i)
-                        vertices.push_back({});
+                    renderObject->common = common;
 
-                    renderObject->cloth.emplace();
+                    renderObject->vertices.byteOffset = vertices.size() * sizeof(vertices[0]);
+                    renderObject->vertices.byteLength = positionAccessor.count * sizeof(vertices[0]);
+                    renderObject->vertices.count = positionAccessor.count;
+                    renderObject->indices.byteOffset = indices.size() * sizeof(indices[0]);
+                    renderObject->indices.byteLength = indexAccessor.count * sizeof(indices[0]);
+                    renderObject->indices.count = indexAccessor.count;
+                    renderObject->indexFormat = WGPUIndexFormat_Uint16;
 
-                    renderObject->cloth->edges.byteOffset = clothEdges.size() * sizeof(clothEdges[0]);
-                    renderObject->cloth->edges.count = vertexCount * CLOTH_EDGES_PER_VERTEX;
-                    renderObject->cloth->edges.byteLength = renderObject->cloth->edges.count * sizeof(clothEdges[0]);
+                    renderObject->uniforms.modelMatrix = glm::mat4(1.f);
+                    renderObject->uniforms.baseColorFactor = materialIn.baseColorFactor;
+                    renderObject->uniforms.metallicFactor = materialIn.metallicFactor;
+                    renderObject->uniforms.roughnessFactor = materialIn.roughnessFactor;
+                    renderObject->uniforms.emissiveFactor = materialIn.emissiveFactor;
 
-                    renderObject->cloth->vertices.byteOffset = clothVertices.size() * sizeof(clothVertices[0]);
-                    renderObject->cloth->vertices.count = vertexCount;
-                    renderObject->cloth->vertices.byteLength = renderObject->cloth->vertices.count * sizeof(clothVertices[0]);
+                    renderObject->textures.baseColorTextureId = materialIn.baseColorTexture;
+                    renderObject->textures.metallicRoughnessTextureId = materialIn.metallicRoughnessTexture;
+                    renderObject->textures.normalTextureId = materialIn.normalTexture;
 
-                    auto baseVertex = renderObject->vertices.byteOffset / sizeof(vertices[0]);
-                    auto baseIndex = renderObject->indices.byteOffset / sizeof(indices[0]);
-
-                    std::vector<std::vector<std::uint32_t>> edges(vertexCount);
-                    for (int i = 0; i < indexAccessor.count; i += 3)
+                    if (materialIn.baseColorTexture)
                     {
-                        auto i0 = indices[baseIndex + i + 0];
-                        auto i1 = indices[baseIndex + i + 1];
-                        auto i2 = indices[baseIndex + i + 2];
+                        auto & textureInfo = common->textures[*materialIn.baseColorTexture];
+                        textureInfo->users.push_back(renderObject);
+                        textureInfo->sRGB = true;
+                    }
+                    if (materialIn.metallicRoughnessTexture)
+                        common->textures[*materialIn.metallicRoughnessTexture]->users.push_back(renderObject);
+                    if (materialIn.normalTexture)
+                        common->textures[*materialIn.normalTexture]->users.push_back(renderObject);
 
-                        edges[i0].push_back(i1);
-                        edges[i0].push_back(i2);
-                        edges[i1].push_back(i0);
-                        edges[i1].push_back(i2);
-                        edges[i2].push_back(i0);
-                        edges[i2].push_back(i1);
+                    auto const & positionBufferView = asset.bufferViews[positionAccessor.bufferView];
+                    auto const &   normalBufferView = asset.bufferViews[  normalAccessor.bufferView];
+                    auto const &  tangentBufferView = asset.bufferViews[ tangentAccessor.bufferView];
+                    auto const & texcoordBufferView = asset.bufferViews[texcoordAccessor.bufferView];
+                    auto const &    indexBufferView = asset.bufferViews[   indexAccessor.bufferView];
+
+                    auto positionIterator = glTF::AccessorIterator<glm::vec3>(assetBufferData.data() + positionBufferView.byteOffset + positionAccessor.byteOffset, positionBufferView.byteStride);
+                    auto normalIterator = glTF::AccessorIterator<glm::vec3>(assetBufferData.data() + normalBufferView.byteOffset + normalAccessor.byteOffset, normalBufferView.byteStride);
+                    auto tangentIterator = glTF::AccessorIterator<glm::vec4>(assetBufferData.data() + tangentBufferView.byteOffset + tangentAccessor.byteOffset, tangentBufferView.byteStride);
+                    auto texcoordIterator = glTF::AccessorIterator<glm::vec2>(assetBufferData.data() + texcoordBufferView.byteOffset + texcoordAccessor.byteOffset, texcoordBufferView.byteStride);
+
+                    for (int i = 0; i < positionAccessor.count; ++i)
+                    {
+                        vertices.push_back({
+                            *positionIterator++,
+                            *  normalIterator++,
+                            * tangentIterator++,
+                            *texcoordIterator++,
+                            glm::vec4(0.f, 0.f, 0.f, 1.f)
+                        });
+
+                        vertices.back().position = glm::vec3((nodeModelMatrix * glm::vec4(vertices.back().position, 1.f)));
+                        vertices.back().normal = glm::normalize(glm::vec3((nodeModelMatrix * glm::vec4(vertices.back().normal, 0.f))));
+                        vertices.back().tangent = glm::vec4(glm::normalize(glm::vec3((nodeModelMatrix * glm::vec4(glm::vec3(vertices.back().tangent), 0.f)))), vertices.back().tangent.w);
+
+                        renderObject->bbox.expand(vertices.back().position);
                     }
 
-                    std::vector<int> component(vertexCount, -1);
-                    int componentCount = 0;
-                    std::vector<int> componentVertices;
+                    auto indexIterator = glTF::AccessorIterator<std::uint16_t>(assetBufferData.data() + indexBufferView.byteOffset + indexAccessor.byteOffset, indexBufferView.byteStride);
+                    for (int i = 0; i < indexAccessor.count; ++i)
+                        indices.emplace_back(*indexIterator++);
 
-                    for (int i = 0; i < vertexCount; ++i)
+                    if (materialIn.cloth)
                     {
-                        if (component[i] != -1) continue;
+                        // Make sure vertex count for cloth simulation is a multiple of workgroup size
+                        int const vertexCountExtra = (32 - (renderObject->vertices.count % 32)) % 32;
+                        int const vertexCount = renderObject->vertices.count + vertexCountExtra;
 
-                        component[i] = componentCount++;
-                        componentVertices.push_back(1);
+                        for (int i = 0; i < vertexCountExtra; ++i)
+                            vertices.push_back({});
 
-                        std::deque<int> queue;
-                        queue.push_back(i);
+                        renderObject->cloth.emplace();
 
-                        while (!queue.empty())
+                        renderObject->cloth->edges.byteOffset = clothEdges.size() * sizeof(clothEdges[0]);
+                        renderObject->cloth->edges.count = vertexCount * CLOTH_EDGES_PER_VERTEX;
+                        renderObject->cloth->edges.byteLength = renderObject->cloth->edges.count * sizeof(clothEdges[0]);
+
+                        renderObject->cloth->vertices.byteOffset = clothVertices.size() * sizeof(clothVertices[0]);
+                        renderObject->cloth->vertices.count = vertexCount;
+                        renderObject->cloth->vertices.byteLength = renderObject->cloth->vertices.count * sizeof(clothVertices[0]);
+
+                        auto baseVertex = renderObject->vertices.byteOffset / sizeof(vertices[0]);
+                        auto baseIndex = renderObject->indices.byteOffset / sizeof(indices[0]);
+
+                        std::vector<std::vector<std::uint32_t>> edges(vertexCount);
+                        for (int i = 0; i < indexAccessor.count; i += 3)
                         {
-                            auto v = queue.front();
-                            queue.pop_front();
+                            auto i0 = indices[baseIndex + i + 0];
+                            auto i1 = indices[baseIndex + i + 1];
+                            auto i2 = indices[baseIndex + i + 2];
 
-                            for (auto e : edges[v])
+                            edges[i0].push_back(i1);
+                            edges[i0].push_back(i2);
+                            edges[i1].push_back(i0);
+                            edges[i1].push_back(i2);
+                            edges[i2].push_back(i0);
+                            edges[i2].push_back(i1);
+                        }
+
+                        std::vector<int> component(vertexCount, -1);
+                        int componentCount = 0;
+                        std::vector<int> componentVertices;
+
+                        for (int i = 0; i < vertexCount; ++i)
+                        {
+                            if (component[i] != -1) continue;
+
+                            component[i] = componentCount++;
+                            componentVertices.push_back(1);
+
+                            std::deque<int> queue;
+                            queue.push_back(i);
+
+                            while (!queue.empty())
                             {
-                                if (component[e] == -1)
+                                auto v = queue.front();
+                                queue.pop_front();
+
+                                for (auto e : edges[v])
                                 {
-                                    component[e] = component[v];
-                                    queue.push_back(e);
-                                    componentVertices.back()++;
+                                    if (component[e] == -1)
+                                    {
+                                        component[e] = component[v];
+                                        queue.push_back(e);
+                                        componentVertices.back()++;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    std::vector<int> componentTriangles(componentCount, 0);
-                    std::vector<glm::vec3> avgComponentNormal(componentCount, glm::vec3(0.0));
+                        std::vector<int> componentTriangles(componentCount, 0);
+                        std::vector<glm::vec3> avgComponentNormal(componentCount, glm::vec3(0.0));
 
-                    for (int i = 0; i < indexAccessor.count; i += 3)
-                    {
-                        auto i0 = indices[baseIndex + i + 0];
-                        auto i1 = indices[baseIndex + i + 1];
-                        auto i2 = indices[baseIndex + i + 2];
-
-                        auto c = component[i0];
-
-                        componentTriangles[c] += 1;
-
-                        auto p0 = vertices[baseVertex + i0].position;
-                        auto p1 = vertices[baseVertex + i1].position;
-                        auto p2 = vertices[baseVertex + i2].position;
-
-                        auto n = glm::normalize(glm::cross(p1 - p0, p2 - p0));
-                        avgComponentNormal[c] += n;
-                    }
-
-                    for (int c = 0; c < componentCount; ++c)
-                        if (componentTriangles[c] > 0)
-                            avgComponentNormal[c] /= (1.f * componentTriangles[c]);
-
-                    // Sponza-specific heuristic: remove cloth mesh connected components which are
-                    //    too small or face negative Z
-
-
-                    std::vector<bool> frontFacing(vertexCount, false);
-
-                    for (int i = 0; i < vertexCount; ++i)
-                    {
-                        int c = component[i];
-                        frontFacing[i] = !(componentVertices[c] < 256 || avgComponentNormal[c].z < 0.f);
-                    }
-
-                    for (auto & vertexEdges : edges)
-                    {
-                        std::sort(vertexEdges.begin(), vertexEdges.end());
-                        auto end = std::unique(vertexEdges.begin(), vertexEdges.end());
-                        end = std::remove_if(vertexEdges.begin(), end, [&](auto i){ return !frontFacing[i]; });
-                        vertexEdges.erase(end, vertexEdges.end());
-                    }
-
-                    std::vector<bool> disconnected(edges.size(), false);
-
-                    for (int i = 0; i < edges.size(); ++i)
-                    {
-                        auto & vertexEdges = edges[i];
-
-                        if (vertexEdges.size() == 2 && edges[vertexEdges[0]].size() == 2 && edges[vertexEdges[1]].size() == 2)
-                            disconnected[i] = true;
-                    }
-
-                    float topY = -std::numeric_limits<float>::infinity();
-
-                    for (int i = 0; i < edges.size(); ++i)
-                    {
-                        auto & vertexEdges = edges[i];
-
-                        bool isTopVertex = true;
-                        for (auto e : vertexEdges)
+                        for (int i = 0; i < indexAccessor.count; i += 3)
                         {
-                            if (vertices[baseVertex + i].position.y < vertices[baseVertex + e].position.y)
+                            auto i0 = indices[baseIndex + i + 0];
+                            auto i1 = indices[baseIndex + i + 1];
+                            auto i2 = indices[baseIndex + i + 2];
+
+                            auto c = component[i0];
+
+                            componentTriangles[c] += 1;
+
+                            auto p0 = vertices[baseVertex + i0].position;
+                            auto p1 = vertices[baseVertex + i1].position;
+                            auto p2 = vertices[baseVertex + i2].position;
+
+                            auto n = glm::normalize(glm::cross(p1 - p0, p2 - p0));
+                            avgComponentNormal[c] += n;
+                        }
+
+                        for (int c = 0; c < componentCount; ++c)
+                            if (componentTriangles[c] > 0)
+                                avgComponentNormal[c] /= (1.f * componentTriangles[c]);
+
+                        // Sponza-specific heuristic: remove cloth mesh connected components which are
+                        //    too small or face negative Z
+
+
+                        std::vector<bool> frontFacing(vertexCount, false);
+
+                        for (int i = 0; i < vertexCount; ++i)
+                        {
+                            int c = component[i];
+                            frontFacing[i] = !(componentVertices[c] < 256 || avgComponentNormal[c].z < 0.f);
+                        }
+
+                        for (auto & vertexEdges : edges)
+                        {
+                            std::sort(vertexEdges.begin(), vertexEdges.end());
+                            auto end = std::unique(vertexEdges.begin(), vertexEdges.end());
+                            end = std::remove_if(vertexEdges.begin(), end, [&](auto i){ return !frontFacing[i]; });
+                            vertexEdges.erase(end, vertexEdges.end());
+                        }
+
+                        std::vector<bool> disconnected(edges.size(), false);
+
+                        for (int i = 0; i < edges.size(); ++i)
+                        {
+                            auto & vertexEdges = edges[i];
+
+                            if (vertexEdges.size() == 2 && edges[vertexEdges[0]].size() == 2 && edges[vertexEdges[1]].size() == 2)
+                                disconnected[i] = true;
+                        }
+
+                        float topY = -std::numeric_limits<float>::infinity();
+
+                        for (int i = 0; i < edges.size(); ++i)
+                        {
+                            auto & vertexEdges = edges[i];
+
+                            bool isTopVertex = true;
+                            for (auto e : vertexEdges)
                             {
-                                isTopVertex = false;
-                                break;
+                                if (vertices[baseVertex + i].position.y < vertices[baseVertex + e].position.y)
+                                {
+                                    isTopVertex = false;
+                                    break;
+                                }
+                            }
+
+                            if (disconnected[i] || !frontFacing[i])
+                            {
+                                vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
+                                vertices[baseVertex + i].position = {0.f, 0.f, 0.f};
+                            }
+                            else if (isTopVertex)
+                            {
+                                vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
+                                topY = std::max(topY, vertices[baseVertex + i].position.y);
+                            }
+                            else if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
+                            {
+                                std::cout << "WARNING: " << vertexEdges.size() << " cloth edges is clamped to " << CLOTH_EDGES_PER_VERTEX;
+                                vertexEdges.resize(CLOTH_EDGES_PER_VERTEX);
+                            }
+                            else while (vertexEdges.size() < CLOTH_EDGES_PER_VERTEX)
+                            {
+                                vertexEdges.push_back(-1);
+                            }
+
+                            for (auto e : vertexEdges)
+                            {
+                                ClothEdge edge;
+                                edge.delta = glm::vec4(0.f);
+                                edge.id = e;
+                                if (e != std::uint32_t(-1))
+                                {
+                                    auto delta = vertices[baseVertex + e].position - vertices[baseVertex + i].position;
+                                    edge.delta = glm::vec4(delta, glm::length(delta));
+                                }
+                                clothEdges.push_back(edge);
                             }
                         }
 
-                        if (disconnected[i] || !frontFacing[i])
+                        // Initial curtain shape, fit to the Sponza scene
+                        for (int i = 0; i < renderObject->vertices.count; ++i)
                         {
-                            vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
-                            vertices[baseVertex + i].position = {0.f, 0.f, 0.f};
-                        }
-                        else if (isTopVertex)
-                        {
-                            vertexEdges.assign(CLOTH_EDGES_PER_VERTEX, std::uint32_t(-1));
-                            topY = std::max(topY, vertices[baseVertex + i].position.y);
-                        }
-                        else if (vertexEdges.size() > CLOTH_EDGES_PER_VERTEX)
-                        {
-                            std::cout << "WARNING: " << vertexEdges.size() << " cloth edges is clamped to " << CLOTH_EDGES_PER_VERTEX;
-                            vertexEdges.resize(CLOTH_EDGES_PER_VERTEX);
-                        }
-                        else while (vertexEdges.size() < CLOTH_EDGES_PER_VERTEX)
-                        {
-                            vertexEdges.push_back(-1);
-                        }
+                            auto & position = vertices[baseVertex + i].position;
 
-                        for (auto e : vertexEdges)
-                        {
-                            ClothEdge edge;
-                            edge.delta = glm::vec4(0.f);
-                            edge.id = e;
-                            if (e != std::uint32_t(-1))
+                            if (!frontFacing[i])
                             {
-                                auto delta = vertices[baseVertex + e].position - vertices[baseVertex + i].position;
-                                edge.delta = glm::vec4(delta, glm::length(delta));
+                                position = glm::vec3(0.f);
                             }
-                            clothEdges.push_back(edge);
+                            else
+                            {
+                                float distance = topY - position.y;
+                                float radius = 2.f;
+                                float angle = distance / radius;
+                                position.y = topY + radius * (1.f - std::cos(angle));
+                                position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
+                            }
                         }
+
+                        for (int i = 0; i < vertexCount; ++i)
+                            clothVertices.push_back({
+                                    .oldVelocity = glm::vec3(0.f),
+                                    .velocity = glm::vec3(0.f),
+                                    .newPosition = vertices[baseVertex + i].position,
+                                });
                     }
 
-                    // Initial curtain shape, fit to the Sponza scene
-                    for (int i = 0; i < renderObject->vertices.count; ++i)
+                    renderObject->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
+
+                    auto fixAlignment = [&](auto & buffer)
                     {
-                        auto & position = vertices[baseVertex + i].position;
+                        while (((buffer.size() * sizeof(buffer[0])) % minStorageBufferOffsetAlignment_) != 0)
+                            buffer.push_back({});
+                    };
 
-                        if (!frontFacing[i])
-                        {
-                            position = glm::vec3(0.f);
-                        }
-                        else
-                        {
-                            float distance = topY - position.y;
-                            float radius = 2.f;
-                            float angle = distance / radius;
-                            position.y = topY + radius * (1.f - std::cos(angle));
-                            position.z += radius * std::sin(angle)  * (position.z < 0.f ? 1.f : -1.f);
-                        }
-                    }
-
-                    for (int i = 0; i < vertexCount; ++i)
-                        clothVertices.push_back({
-                                .oldVelocity = glm::vec3(0.f),
-                                .velocity = glm::vec3(0.f),
-                                .newPosition = vertices[baseVertex + i].position,
-                            });
+                    fixAlignment(vertices);
+                    fixAlignment(indices);
+                    fixAlignment(clothVertices);
+                    fixAlignment(clothEdges);
                 }
-
-                renderObject->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
-
-                auto fixAlignment = [&](auto & buffer)
-                {
-                    while (((buffer.size() * sizeof(buffer[0])) % minStorageBufferOffsetAlignment_) != 0)
-                        buffer.push_back({});
-                };
-
-                fixAlignment(vertices);
-                fixAlignment(indices);
-                fixAlignment(clothVertices);
-                fixAlignment(clothEdges);
             }
         }
 
@@ -866,6 +891,7 @@ void Engine::Impl::renderShadow(std::vector<RenderObjectPtr> const & objects)
     for (int i = 0; i < objects.size(); ++i)
     {
         auto const & object = objects[i];
+        if (object->light) continue;
 
         std::uint32_t dynamicOffset = i * objectUniformBufferStride_;
 
@@ -948,6 +974,7 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
     for (int i = 0; i < objects.size(); ++i)
     {
         auto const & object = objects[i];
+        if (object->light) continue;
 
         std::uint32_t dynamicOffset = i * objectUniformBufferStride_;
 
@@ -1041,7 +1068,8 @@ void Engine::Impl::updateObjectUniformBuffer(std::vector<RenderObjectPtr> const 
         objectBindGroup_ = createObjectBindGroup(device_, objectBindGroupLayout_, objectUniformBuffer_);
 
         for (auto const & object : objects)
-            object->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
+            if (!object->light)
+                object->createTexturesBindGroup(device_, texturesBindGroupLayout_, defaultSampler_);
     }
 
     std::vector<char> objectUniforms(objects.size() * objectUniformBufferStride_);
@@ -1049,6 +1077,31 @@ void Engine::Impl::updateObjectUniformBuffer(std::vector<RenderObjectPtr> const 
         std::memcpy(objectUniforms.data() + i * objectUniformBufferStride_, &objects[i]->uniforms, sizeof(objects[i]->uniforms));
 
     wgpuQueueWriteBuffer(queue_, objectUniformBuffer_, 0, objectUniforms.data(), objectUniforms.size() * sizeof(objectUniforms[0]));
+}
+
+int Engine::Impl::updatePointLightsBuffer(std::vector<RenderObjectPtr> const & objects)
+{
+    std::vector<PointLight> lights;
+    for (auto const & object : objects)
+    {
+        if (object->light)
+        {
+            auto & light = lights.emplace_back();
+            light.position = object->light->position;
+            light.intensity = object->light->intensity;
+        }
+    }
+
+    if (lights.size() * sizeof(lights[0]) > wgpuBufferGetSize(pointLightsBuffer_))
+    {
+        wgpuBufferRelease(pointLightsBuffer_);
+        pointLightsBuffer_ = createStorageBuffer(device_, lights.size() * sizeof(lights[0]));
+        lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_, shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_);
+    }
+
+    wgpuQueueWriteBuffer(queue_, pointLightsBuffer_, 0, lights.data(), lights.size() * sizeof(lights[0]));
+
+    return lights.size();
 }
 
 glm::mat4 Engine::Impl::computeShadowProjection(glm::vec3 const & lightDirection, Box const & sceneBbox)
@@ -1088,7 +1141,7 @@ void Engine::Impl::updateCameraUniformBufferShadow(glm::mat4 const & shadowProje
     wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(CameraUniform));
 }
 
-void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings)
+void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection, Settings const & settings, int pointLightCount)
 {
     LightsUniform lightsUniform;
     lightsUniform.shadowProjection = shadowProjection;
@@ -1096,6 +1149,7 @@ void Engine::Impl::updateLightsUniformBuffer(glm::mat4 const & shadowProjection,
     lightsUniform.envIntensity = settings.envIntensity;
     lightsUniform.sunDirection = settings.sunDirection;
     lightsUniform.sunIntensity = settings.sunIntensity;
+    lightsUniform.pointLightCount = pointLightCount;
 
     wgpuQueueWriteBuffer(queue_, lightsUniformBuffer_, 0, &lightsUniform, sizeof(LightsUniform));
 }
