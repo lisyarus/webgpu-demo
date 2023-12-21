@@ -45,6 +45,7 @@ int main()
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
     glm::vec3 shockCenter(0.f);
+    glm::vec3 shockDirection(0.f, 0.f, 1.f);
     float shockDistance = 1e9f;
 
     for (bool running = true; running;)
@@ -92,6 +93,7 @@ int main()
             if (event->key.keysym.scancode == SDL_SCANCODE_F)
             {
                 shockCenter = camera.position();
+                shockDirection = glm::normalize(glm::vec3(glm::inverse(camera.viewMatrix()) * glm::vec4(0.f, 0.f, -1.f, 0.f)));
                 shockDistance = 0.f;
             }
             if (event->key.keysym.scancode == SDL_SCANCODE_G)
@@ -159,6 +161,7 @@ int main()
 
         settings.paused = paused;
         settings.shockCenter = shockCenter;
+        settings.shockDirection = shockDirection;
         settings.shockDistance = shockDistance;
         settings.time = time;
         settings.dt = dt;

@@ -21,6 +21,7 @@ struct Camera {
     viewProjectionInverse : mat4x4f,
     position : vec3f,
     shock : vec4f,
+    shockDirection : vec3f,
     time : f32,
 }
 
@@ -333,9 +334,11 @@ fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -
         litColor += volumetricLight(light.position, light.intensity, camera.position, in.worldPosition, 2.0 * radius);
     }
 
-    let shockDistance = length(camera.shock.xyz - in.worldPosition);
+    let shockDelta = in.worldPosition - camera.shock.xyz;
+    let shockDistance = length(shockDelta);
     let shockD = camera.shock.w - shockDistance;
-    let shockFactor = exp(- shockD * shockD * 10.0) + 0.04 * step(0.0, shockD) * exp(- shockD * shockD * 0.4) * (0.5 + 0.5 * sin(shockD * 16.0));
+    let shockA = 0.5 + 0.5 * dot(shockDelta / shockDistance, camera.shockDirection);
+    let shockFactor = (exp(- shockD * shockD * 10.0) + 0.25 * step(0.0, shockD) * exp(- shockD * shockD * 0.4) * (0.5 + 0.5 * sin(shockD * 16.0))) * pow(shockA, 256.0);
 
     let shockColor = mix(litColor, lights.sunIntensity * 0.3, shockFactor);
 
@@ -554,6 +557,8 @@ struct Camera {
     viewProjectionInverse : mat4x4f,
     position : vec3f,
     shock : vec4f,
+    shockDirection : vec3f,
+    time : f32,
 }
 
 @group(0) @binding(0) var<storage, read_write> vertices : array<Vertex>;
@@ -635,9 +640,12 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
         let shockDelta = currentPosition - camera.shock.xyz;
         let shockDistance = length(shockDelta);
-        let shockStrength = SHOCK * exp(- (shockDistance - camera.shock.w) * (shockDistance - camera.shock.w) * 1.0);
+        let shockDir = shockDelta / shockDistance;
+        let shockD = camera.shock.w - shockDistance;
+        let shockA = 0.5 + 0.5 * dot(shockDir, camera.shockDirection);
+        let shockStrength = SHOCK * exp(- shockD * shockD * 1.0) * pow(shockA, 256.0);
 
-        force += shockDelta * (shockStrength / shockDistance);
+        force += shockDir * shockStrength;
 
         let currentVelocity = clothVertices[id.x].velocity;
 

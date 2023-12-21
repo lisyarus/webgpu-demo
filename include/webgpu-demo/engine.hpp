@@ -35,6 +35,7 @@ struct Engine
         glm::vec3 sunIntensity;
         bool paused;
         glm::vec3 shockCenter;
+        glm::vec3 shockDirection;
         float shockDistance;
         float time;
         float dt;

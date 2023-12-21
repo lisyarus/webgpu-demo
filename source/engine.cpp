@@ -377,6 +377,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     int pointLightCount = updatePointLightsBuffer(objects);
 
+    updateCameraBuffer(camera, settings, cameraUniformBuffer_, {wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
     simulateCloth(objects, camera, settings, settings.paused ? 0 : 16);
 
     WGPUTextureView targetView = createTextureView(target);
@@ -833,13 +834,6 @@ std::vector<RenderObjectPtr> Engine::Impl::loadGLTF(std::filesystem::path const 
 void Engine::Impl::simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, Settings const & settings, int iterations)
 {
     {
-        CameraUniform cameraUniform;
-        cameraUniform.position = camera.position();
-        cameraUniform.shock = glm::vec4(settings.shockCenter, settings.shockDistance);
-        wgpuQueueWriteBuffer(queue_, cameraUniformBuffer_, 0, &cameraUniform, sizeof(cameraUniform));
-    }
-
-    {
         ClothSettingsUniform settingsUniform;
         settingsUniform.dt = std::min(0.001f, settings.dt / iterations);
         settingsUniform.gravity = settings.gravity ? 10.f : 0.f;
@@ -1052,6 +1046,7 @@ void Engine::Impl::updateCameraBuffer(Camera const & camera, Settings const & se
     cameraUniform.viewProjectionInverse = glm::inverse(cameraUniform.viewProjection);
     cameraUniform.position = camera.position();
     cameraUniform.shock = glm::vec4(settings.shockCenter, settings.shockDistance);
+    cameraUniform.shockDirection = settings.shockDirection;
     cameraUniform.time = settings.time;
 
     wgpuQueueWriteBuffer(queue_, buffer, 0, &cameraUniform, sizeof(CameraUniform));

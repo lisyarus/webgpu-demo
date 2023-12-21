@@ -39,8 +39,8 @@ struct CameraUniform
     glm::vec3 position;
     float padding1[1];
     glm::vec4 shock;
+    glm::vec3 shockDirection;
     float time;
-    float padding2[3];
 };
 
 struct ObjectUniform
