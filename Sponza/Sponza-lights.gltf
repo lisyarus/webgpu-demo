@@ -21,6 +21,16 @@
                     "intensity" : 1000,
                     "type" : "point",
                     "name" : "Point"
+                },
+                {
+                    "color" : [
+                        0.05714285373687744,
+                        0.26579076051712036,
+                        1
+                    ],
+                    "intensity" : 1000,
+                    "type" : "point",
+                    "name" : "Point1"
                 }
             ]
         }
@@ -79,7 +89,7 @@
         {
             "extensions" : {
                 "KHR_lights_punctual" : {
-                    "light" : 0
+                    "light" : 1
                 }
             },
             "name" : "Point.002",
@@ -98,7 +108,7 @@
         {
             "extensions" : {
                 "KHR_lights_punctual" : {
-                    "light" : 0
+                    "light" : 1
                 }
             },
             "name" : "Point.003",
