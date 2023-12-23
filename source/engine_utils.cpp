@@ -1,6 +1,7 @@
 #include <webgpu-demo/engine_utils.hpp>
 
 #include <vector>
+#include <fstream>
 
 glm::mat4 glToVkProjection(glm::mat4 matrix)
 {
@@ -62,6 +63,8 @@ struct PointLight {
 @group(3) @binding(3) var envSampler: sampler;
 @group(3) @binding(4) var envMapTexture : texture_2d<f32>;
 @group(3) @binding(5) var<storage, read> pointLights : array<PointLight>;
+@group(3) @binding(6) var noise3DTexture : texture_3d<f32>;
+@group(3) @binding(7) var noise3DSampler : sampler;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -201,52 +204,9 @@ fn computeLighting(
     return material * lightness * lightIntensity;
 }
 
-fn hash(p : vec3f) -> vec3f
-{
-    let q = vec3f(
-        dot(p, vec3f(127.1, 311.7, 412.3)),
-        dot(p, vec3f(269.5, 183.3, 112.5)),
-        dot(p, vec3f(351.1, 126.3, 256.1))
-    );
-    return fract(sin(q)*43758.5453123);
-}
-
-fn noise(p : vec3f) -> f32
-{
-    let i = vec3i(floor(p));
-
-    var v : array<array<array<f32, 2>, 2>, 2>;
-    for (var x = 0; x < 2; x += 1) {
-        for (var y = 0; y < 2; y += 1) {
-            for (var z = 0; z < 2; z += 1) {
-                let q = vec3f(i + vec3i(x, y, z));
-                let g = hash(q);
-                let d = p - q;
-                v[x][y][z] = dot(g, d);
-            }
-        }
-    }
-
-    let s = p - vec3f(i);
-
-    for (var x = 0; x < 2; x += 1) {
-        for (var y = 0; y < 2; y += 1) {
-            v[x][y][0] = mix(v[x][y][0], v[x][y][1], s.z);
-        }
-    }
-
-    for (var x = 0; x < 2; x += 1) {
-        v[x][0][0] = mix(v[x][0][0], v[x][1][0], s.y);
-    }
-
-    v[0][0][0] = mix(v[0][0][0], v[1][0][0], s.x);
-
-    return 0.5 * (1.0 + v[0][0][0] * sqrt(4.0 / 3.0));
-}
-
 fn fractalNoise(p : vec3f) -> f32
 {
-    return (4.0 * noise(p * 25.0) + 2.0 * noise(p * 50.0) + 1.0 * noise(p * 100.0)) / 7.0;
+    return textureSample(noise3DTexture, noise3DSampler, p).r;
 }
 
 fn volumetricLight(
@@ -273,34 +233,32 @@ fn volumetricLight(
 
     let tmin = clamp(- rdotd - sqrt(D), 0.0, maxDist);
     let tmax = clamp(- rdotd + sqrt(D), 0.0, maxDist);
-    let N = 8;
+    let N = 32;
     let dt = (tmax - tmin) / f32(N);
     var result = 0.0;
     for (var i = 0; i < N; i += 1) {
         let p = rayStart + (tmin + (f32(i) + 0.5) * dt) * d;
-        let v = fractalNoise(p * vec3f(1.0, 0.5, 1.0) + vec3f(0.0, - camera.time * 0.25, 0.0))
-            * pow(1.0 - length(p.xz - lightPosition.xz) / radius, 0.2);
+        let v = (
+                  0.5 * fractalNoise(p * vec3f(1.0, 0.5, 1.0) * 5.0 + vec3f(0.0, - camera.time * 2.0, 0.0))
+                + 0.5 * fractalNoise(p * vec3f(1.0, 0.5, 1.0) * 7.0 + vec3f(0.0, - camera.time * 1.4, 0.0))
+            )
+            * pow(1.0 - length(p.xz - lightPosition.xz) / radius, 0.5);
 
-        result += max(0.0, 4.0 * (v - mix(0.4, 0.55, pow(0.5 + 0.5 * (p.y - lightPosition.y) / radius, 1.5)))) * dt;
+        result += max(0.0, 4.0 * (v - mix(0.3, 0.6, pow(0.5 + 0.5 * (p.y - lightPosition.y) / radius, 1.5)))) * dt;
     }
 
     return lightIntensity * result;
 }
 
-fn cheapNoise(p : vec3f) -> f32
-{
-    return sin(dot(p, vec3f(3.61, 5.12, 4.36)));
-}
-
 fn randomizeLightPosition(p : vec3f) -> vec3f
 {
-    let t = 5.0 * camera.time;
-    let s = 0.02;
+    let t = 0.1 * camera.time;
+    let s = 0.05;
 
     var q = p;
-    q.x += s * cheapNoise(p + vec3f(t, 0.0, 0.0));
-    q.y += s * cheapNoise(p + vec3f(0.0, t, 0.0));
-    q.z += s * cheapNoise(p + vec3f(0.0, 0.0, t));
+    q.x += s * (-1.0 + 2.0 * fractalNoise(p + vec3f(4.25 * t, 0.0, 0.0)));
+    q.y += s * (-1.0 + 2.0 * fractalNoise(p + vec3f(0.0, 2.57 * t, 0.0)));
+    q.z += s * (-1.0 + 2.0 * fractalNoise(p + vec3f(0.0, 0.0, 1.26 * t)));
 
     return q;
 }
@@ -913,7 +871,7 @@ WGPUBindGroupLayout createTexturesBindGroupLayout(WGPUDevice device)
 
 WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
 {
-    WGPUBindGroupLayoutEntry entries[6];
+    WGPUBindGroupLayoutEntry entries[8];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -1023,10 +981,46 @@ WGPUBindGroupLayout createLightsBindGroupLayout(WGPUDevice device)
     entries[5].storageTexture.format = WGPUTextureFormat_Undefined;
     entries[5].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
+    entries[6].nextInChain = nullptr;
+    entries[6].binding = 6;
+    entries[6].visibility = WGPUShaderStage_Fragment;
+    entries[6].buffer.nextInChain = nullptr;
+    entries[6].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[6].buffer.hasDynamicOffset = false;
+    entries[6].buffer.minBindingSize = 0;
+    entries[6].sampler.nextInChain = nullptr;
+    entries[6].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[6].texture.nextInChain = nullptr;
+    entries[6].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[6].texture.multisampled = false;
+    entries[6].texture.viewDimension = WGPUTextureViewDimension_3D;
+    entries[6].storageTexture.nextInChain = nullptr;
+    entries[6].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[6].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[6].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[7].nextInChain = nullptr;
+    entries[7].binding = 7;
+    entries[7].visibility = WGPUShaderStage_Fragment;
+    entries[7].buffer.nextInChain = nullptr;
+    entries[7].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[7].buffer.hasDynamicOffset = false;
+    entries[7].buffer.minBindingSize = 0;
+    entries[7].sampler.nextInChain = nullptr;
+    entries[7].sampler.type = WGPUSamplerBindingType_Filtering;
+    entries[7].texture.nextInChain = nullptr;
+    entries[7].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[7].texture.multisampled = false;
+    entries[7].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[7].storageTexture.nextInChain = nullptr;
+    entries[7].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[7].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[7].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
     WGPUBindGroupLayoutDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.entryCount = 6;
+    descriptor.entryCount = 8;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
@@ -1665,9 +1659,9 @@ WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
 
 WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
     WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView,
-    WGPUBuffer pointLightsBuffer)
+    WGPUBuffer pointLightsBuffer, WGPUTextureView noise3DView, WGPUSampler noise3DSampler)
 {
-    WGPUBindGroupEntry entries[6];
+    WGPUBindGroupEntry entries[8];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -1717,11 +1711,27 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     entries[5].sampler = nullptr;
     entries[5].textureView = nullptr;
 
+    entries[6].nextInChain = nullptr;
+    entries[6].binding = 6;
+    entries[6].buffer = nullptr;
+    entries[6].offset = 0;
+    entries[6].size = 0;
+    entries[6].sampler = nullptr;
+    entries[6].textureView = noise3DView;
+
+    entries[7].nextInChain = nullptr;
+    entries[7].binding = 7;
+    entries[7].buffer = nullptr;
+    entries[7].offset = 0;
+    entries[7].size = 0;
+    entries[7].sampler = noise3DSampler;
+    entries[7].textureView = nullptr;
+
     WGPUBindGroupDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.layout = bindGroupLayout;
-    descriptor.entryCount = 6;
+    descriptor.entryCount = 8;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroup(device, &descriptor);
@@ -1981,6 +1991,25 @@ WGPUSampler createEnvSampler(WGPUDevice device)
     return wgpuDeviceCreateSampler(device, &descriptor);
 }
 
+WGPUSampler create3DNoiseSampler(WGPUDevice device)
+{
+    WGPUSamplerDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.addressModeU = WGPUAddressMode_Repeat;
+    descriptor.addressModeV = WGPUAddressMode_Repeat;
+    descriptor.addressModeW = WGPUAddressMode_Repeat;
+    descriptor.magFilter = WGPUFilterMode_Linear;
+    descriptor.minFilter = WGPUFilterMode_Linear;
+    descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    descriptor.lodMinClamp = 0.f;
+    descriptor.lodMaxClamp = 0.f;
+    descriptor.compare = WGPUCompareFunction_Undefined;
+    descriptor.maxAnisotropy = 1;
+
+    return wgpuDeviceCreateSampler(device, &descriptor);
+}
+
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue)
 {
     auto sRGBViewFormat = WGPUTextureFormat_RGBA8UnormSrgb;
@@ -2101,4 +2130,70 @@ WGPUTexture createStubEnvTexture(WGPUDevice device, WGPUQueue queue)
     wgpuQueueWriteTexture(queue, &imageCopyTexture, pixels.data(), pixels.size() * sizeof(pixels[0]), &textureDataLayout, &writeSize);
 
     return texture;
+}
+
+WGPUTexture create3DNoiseTexture(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & path)
+{
+    std::vector<std::uint8_t> noiseData(std::filesystem::file_size(path));
+    {
+        std::ifstream input(path, std::ios::binary);
+        input.read(reinterpret_cast<char *>(noiseData.data()), noiseData.size());
+    }
+
+    // Assume cubic texture
+    std::uint32_t textureSize = std::pow<float>(noiseData.size(), 1.f / 3.f);
+    if (textureSize * textureSize * textureSize != noiseData.size())
+        throw std::runtime_error("3D noise texture must have all dimensions equal");
+
+    WGPUTextureDescriptor textureDescriptor;
+    textureDescriptor.nextInChain = nullptr;
+    textureDescriptor.label = nullptr;
+    textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    textureDescriptor.dimension = WGPUTextureDimension_3D;
+    textureDescriptor.size = {textureSize, textureSize, textureSize};
+    textureDescriptor.format = WGPUTextureFormat_R8Unorm;
+    textureDescriptor.mipLevelCount = 1;
+    textureDescriptor.sampleCount = 1;
+    textureDescriptor.viewFormatCount = 0;
+    textureDescriptor.viewFormats = nullptr;
+
+    auto texture = wgpuDeviceCreateTexture(device, &textureDescriptor);
+
+    WGPUImageCopyTexture imageCopyTexture;
+    imageCopyTexture.nextInChain = nullptr;
+    imageCopyTexture.texture = texture;
+    imageCopyTexture.mipLevel = 0;
+    imageCopyTexture.origin = {0, 0, 0};
+    imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+    WGPUTextureDataLayout textureDataLayout;
+    textureDataLayout.nextInChain = nullptr;
+    textureDataLayout.offset = 0;
+    textureDataLayout.bytesPerRow = textureSize;
+    textureDataLayout.rowsPerImage = textureSize;
+
+    WGPUExtent3D writeSize;
+    writeSize.width = textureSize;
+    writeSize.height = textureSize;
+    writeSize.depthOrArrayLayers = textureSize;
+
+    wgpuQueueWriteTexture(queue, &imageCopyTexture, noiseData.data(), noiseData.size() * sizeof(noiseData[0]), &textureDataLayout, &writeSize);
+
+    return texture;
+}
+
+WGPUTextureView create3DNoiseTextureView(WGPUTexture texture)
+{
+    WGPUTextureViewDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.format = WGPUTextureFormat_R8Unorm;
+    descriptor.dimension = WGPUTextureViewDimension_3D;
+    descriptor.baseMipLevel = 0;
+    descriptor.mipLevelCount = 1;
+    descriptor.baseArrayLayer = 0;
+    descriptor.arrayLayerCount = 1;
+    descriptor.aspect = WGPUTextureAspect_All;
+
+    return wgpuTextureCreateView(texture, &descriptor);
 }

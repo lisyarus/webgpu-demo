@@ -17,7 +17,7 @@ using RenderObjectPtr = std::shared_ptr<RenderObject>;
 
 struct Engine
 {
-    Engine(WGPUDevice device, WGPUQueue queue);
+    Engine(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath);
     ~Engine();
 
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);

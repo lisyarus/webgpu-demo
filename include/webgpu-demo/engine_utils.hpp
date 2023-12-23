@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include <initializer_list>
+#include <filesystem>
 
 struct Vertex
 {
@@ -125,7 +126,8 @@ WGPUBindGroup createEmptyBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGr
 WGPUBindGroup createCameraBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer);
 WGPUBindGroup createObjectBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer);
 WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer,
-    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView, WGPUBuffer pointLightsBuffer);
+    WGPUSampler shadowSampler, WGPUTextureView shadowMapView, WGPUSampler envSampler, WGPUTextureView envMapView,
+    WGPUBuffer pointLightsBuffer, WGPUTextureView noise3DView, WGPUSampler noise3DSampler);
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 
@@ -144,8 +146,11 @@ WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder);
 WGPUSampler createDefaultSampler(WGPUDevice device);
 WGPUSampler createShadowSampler(WGPUDevice device);
 WGPUSampler createEnvSampler(WGPUDevice device);
+WGPUSampler create3DNoiseSampler(WGPUDevice device);
 
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size);
 WGPUTexture createShadowMapDepthTexture(WGPUDevice device, std::uint32_t size);
 WGPUTexture createStubEnvTexture(WGPUDevice device, WGPUQueue queue);
+WGPUTexture create3DNoiseTexture(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & path);
+WGPUTextureView create3DNoiseTextureView(WGPUTexture texture);

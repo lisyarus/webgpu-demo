@@ -18,7 +18,7 @@
 
 struct Engine::Impl
 {
-    Impl(WGPUDevice device, WGPUQueue queue);
+    Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3dPath);
     ~Impl();
 
     void setEnvMap(std::filesystem::path const & hdrImagePath);
@@ -63,6 +63,7 @@ private:
     WGPUSampler defaultSampler_;
     WGPUSampler shadowSampler_;
     WGPUSampler envSampler_;
+    WGPUSampler noise3DSampler_;
 
     WGPUPipelineLayout mainPipelineLayout_;
     WGPURenderPipeline mainPipeline_;
@@ -91,6 +92,8 @@ private:
     WGPUTexture stubEnvTexture_;
     WGPUTexture envTexture_;
     WGPUTextureView envTextureView_;
+    WGPUTexture noise3DTexture_;
+    WGPUTextureView noise3DTextureView_;
 
     std::uint64_t objectUniformBufferStride_ = 256;
 
@@ -128,7 +131,7 @@ private:
     void loaderThreadMain();
 };
 
-Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
+Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath)
     : device_(device)
     , queue_(queue)
     , minStorageBufferOffsetAlignment_(minStorageBufferOffsetAlignment(device_))
@@ -164,6 +167,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , defaultSampler_(createDefaultSampler(device_))
     , shadowSampler_(createShadowSampler(device_))
     , envSampler_(createEnvSampler(device_))
+    , noise3DSampler_(create3DNoiseSampler(device_))
 
     // Pipelines
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
@@ -195,6 +199,10 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue)
     , stubEnvTexture_(createStubEnvTexture(device_, queue_))
     , envTexture_(nullptr)
     , envTextureView_(createTextureView(stubEnvTexture_))
+
+    // Noise textures
+    , noise3DTexture_(create3DNoiseTexture(device_, queue_, noise3DPath))
+    , noise3DTextureView_(create3DNoiseTextureView(noise3DTexture_))
 
     // Bind groups
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
@@ -1311,7 +1319,7 @@ void Engine::Impl::recreateLightsBindGroup()
         wgpuBindGroupRelease(lightsBindGroup_);
 
     lightsBindGroup_ = createLightsBindGroup(device_, lightsBindGroupLayout_, lightsUniformBuffer_,
-        shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_);
+        shadowSampler_, shadowMapView_, envSampler_, envTextureView_, pointLightsBuffer_, noise3DTextureView_, noise3DSampler_);
 }
 
 void Engine::Impl::loaderThreadMain()
@@ -1325,8 +1333,8 @@ void Engine::Impl::loaderThreadMain()
     }
 }
 
-Engine::Engine(WGPUDevice device, WGPUQueue queue)
-    : pimpl_(std::make_unique<Impl>(device, queue))
+Engine::Engine(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath)
+    : pimpl_(std::make_unique<Impl>(device, queue, noise3DPath))
 {}
 
 Engine::~Engine() = default;

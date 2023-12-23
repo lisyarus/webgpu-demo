@@ -11,9 +11,15 @@
 
 int main(int argc, char ** argv)
 {
+    std::filesystem::path const noise3DPath = PROJECT_ROOT "/noise-3d.raw";
+    std::filesystem::path const dayEnvMapPath = PROJECT_ROOT "/clarens_midday_4k.hdr";
+    std::filesystem::path const nightEnvMapPath = PROJECT_ROOT "/satara_night_4k.hdr";
+    std::filesystem::path const sponzaPath = PROJECT_ROOT "/Sponza/Sponza.gltf";
+    std::filesystem::path const sponzaLightsPath = PROJECT_ROOT "/Sponza/Sponza-lights.gltf";
+
     Application application;
-    Engine engine(application.device(), application.queue());
-    engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
+    Engine engine(application.device(), application.queue(), noise3DPath);
+    engine.setEnvMap(dayEnvMapPath);
 
     std::vector<RenderObjectPtr> renderObjects;
     for (int i = 1; i < argc; ++i)
@@ -24,8 +30,8 @@ int main(int argc, char ** argv)
 
     if (argc == 1)
     {
-        renderObjects = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza.gltf");
-        auto lights = engine.loadGLTF(PROJECT_ROOT "/Sponza/Sponza-lights.gltf");
+        renderObjects = engine.loadGLTF(sponzaPath);
+        auto lights = engine.loadGLTF(sponzaLightsPath);
         renderObjects.insert(renderObjects.end(), lights.begin(), lights.end());
     }
 
@@ -90,9 +96,9 @@ int main(int argc, char ** argv)
                 day ^= true;
 
                 if (day)
-                    engine.setEnvMap(PROJECT_ROOT "/clarens_midday_4k.hdr");
+                    engine.setEnvMap(dayEnvMapPath);
                 else
-                    engine.setEnvMap(PROJECT_ROOT "/satara_night_4k.hdr");
+                    engine.setEnvMap(nightEnvMapPath);
             }
             if (event->key.keysym.scancode == SDL_SCANCODE_V)
             {
