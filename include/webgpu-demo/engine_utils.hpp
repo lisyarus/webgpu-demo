@@ -91,6 +91,7 @@ extern const char genMipmapShader[];
 extern const char genEnvMipmapShader[];
 extern const char blurShadowShader[];
 extern const char simulateClothShader[];
+extern const char ldrShader[];
 
 std::uint32_t minStorageBufferOffsetAlignment(WGPUDevice device);
 
@@ -105,12 +106,13 @@ WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
 
-WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
+WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
-WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
+WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapSRGBPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createMipmapEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
@@ -118,7 +120,8 @@ WGPUComputePipeline createBlurShadowXPipeline(WGPUDevice device, WGPUPipelineLay
 WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
-WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
+WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPURenderPipeline createLDRPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 WGPUBuffer createStorageBuffer(WGPUDevice device, std::uint64_t size);
@@ -131,6 +134,7 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     WGPUBuffer pointLightsBuffer, WGPUTextureView noise3DView, WGPUSampler noise3DSampler);
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
+WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
 WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFormat format);
@@ -141,6 +145,7 @@ WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WG
 WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
 WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget);
 WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget);
+WGPURenderPassEncoder createLDRRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView target);
 WGPUComputePassEncoder createComputePass(WGPUCommandEncoder commandEncoder);
 
 WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder);

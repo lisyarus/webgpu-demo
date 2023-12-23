@@ -47,12 +47,14 @@ private:
     WGPUBindGroupLayout genMipmapEnvBindGroupLayout_;
     WGPUBindGroupLayout blurShadowBindGroupLayout_;
     WGPUBindGroupLayout simulateClothBindGroupLayout_;
+    WGPUBindGroupLayout hdrBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
     WGPUShaderModule genMipmapShaderModule_;
     WGPUShaderModule genMipmapEnvShaderModule_;
     WGPUShaderModule blurShadowShaderModule_;
     WGPUShaderModule simulateClothShaderModule_;
+    WGPUShaderModule ldrShaderModule_;
 
     WGPUTexture shadowMap_;
     WGPUTexture shadowMapAux_;
@@ -85,6 +87,8 @@ private:
     WGPUComputePipeline simulateClothCopyPipeline_;
     WGPUPipelineLayout renderWaterPipelineLayout_;
     WGPURenderPipeline renderWaterPipeline_;
+    WGPUPipelineLayout ldrPipelineLayout_;
+    WGPURenderPipeline ldrPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -106,11 +110,14 @@ private:
     WGPUBindGroup lightsBindGroup_;
     WGPUBindGroup blurShadowXBindGroup_;
     WGPUBindGroup blurShadowYBindGroup_;
+    WGPUBindGroup hdrBindGroup_;
 
-    WGPUTexture frameTexture_;
-    WGPUTextureView frameTextureView_;
-    WGPUTexture depthTexture_;
-    WGPUTextureView depthTextureView_;
+    WGPUTexture hdrMultisampleTexture_;
+    WGPUTextureView hdrMultisampleTextureView_;
+    WGPUTexture hdrResolveTexture_;
+    WGPUTextureView hdrResolveTextureView_;
+    WGPUTexture multisampleDepthTexture_;
+    WGPUTextureView multisampleDepthTextureView_;
 
     WGPUTexture whiteTexture_;
 
@@ -124,11 +131,12 @@ private:
     void simulateCloth(std::vector<RenderObjectPtr> const & objects, Camera const & camera, Settings const & settings, int iterations);
     void renderShadow(std::vector<RenderObjectPtr> const & objects);
     void blurShadow();
-    void renderEnv(WGPUTextureView targetView);
-    void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
-    void renderWater(WGPUTextureView targetView);
+    void renderEnv();
+    void renderMain(std::vector<RenderObjectPtr> const & objects);
+    void renderWater();
+    void renderLDR(WGPUTextureView targetView, WGPUTextureFormat surfaceFormat);
 
-    void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
+    void updateFrameBuffer(glm::uvec2 const & renderTargetSize);
     void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer, glm::ivec2 const & viewport);
     void updateObjectUniformBuffer(std::vector<RenderObjectPtr> const & objects);
     int updatePointLightsBuffer(std::vector<RenderObjectPtr> const & objects);
@@ -156,6 +164,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , genMipmapEnvBindGroupLayout_(createGenEnvMipmapBindGroupLayout(device_))
     , blurShadowBindGroupLayout_(createBlurShadowBindGroupLayout(device_))
     , simulateClothBindGroupLayout_(createSimulateClothBindGroupLayout(device_))
+    , hdrBindGroupLayout_(createHDRBindGroupLayout(device_))
 
     // Shader modules
     , shaderModule_(createShaderModule(device_, mainShader))
@@ -163,6 +172,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , genMipmapEnvShaderModule_(createShaderModule(device_, genEnvMipmapShader))
     , blurShadowShaderModule_(createShaderModule(device_, blurShadowShader))
     , simulateClothShaderModule_(createShaderModule(device_, simulateClothShader))
+    , ldrShaderModule_(createShaderModule(device_, ldrShader))
 
     // Shadow map textures & views
     , shadowMap_(createShadowMapTexture(device_, 2048))
@@ -180,11 +190,11 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
 
     // Pipelines
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
-    , mainPipeline_(nullptr)
+    , mainPipeline_(createMainPipeline(device_, mainPipelineLayout_, shaderModule_))
     , shadowPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_}))
     , shadowPipeline_(createShadowPipeline(device_, shadowPipelineLayout_, shaderModule_))
     , envPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, emptyBindGroupLayout_, emptyBindGroupLayout_, lightsBindGroupLayout_}))
-    , envPipeline_(nullptr)
+    , envPipeline_(createEnvPipeline(device_, envPipelineLayout_, shaderModule_))
     , genMipmapPipelineLayout_(createPipelineLayout(device_, {genMipmapBindGroupLayout_}))
     , genMipmapPipeline_(createMipmapPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
     , genMipmapSRGBPipeline_(createMipmapSRGBPipeline(device_, genMipmapPipelineLayout_, genMipmapShaderModule_))
@@ -197,7 +207,9 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , simulateClothPipeline_(createSimulateClothPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
     , simulateClothCopyPipeline_(createSimulateClothCopyPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
     , renderWaterPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_}))
-    , renderWaterPipeline_(nullptr)
+    , renderWaterPipeline_(createRenderWaterPipeline(device_, renderWaterPipelineLayout_, shaderModule_))
+    , ldrPipelineLayout_(createPipelineLayout(device_, {hdrBindGroupLayout_}))
+    , ldrPipeline_(nullptr)
 
     // Uniform buffers
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
@@ -222,12 +234,15 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , lightsBindGroup_(nullptr)
     , blurShadowXBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapView_, shadowMapAuxView_))
     , blurShadowYBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapAuxView_, shadowMapView_))
+    , hdrBindGroup_(nullptr)
 
     // Frame textures
-    , frameTexture_(nullptr)
-    , frameTextureView_(nullptr)
-    , depthTexture_(nullptr)
-    , depthTextureView_(nullptr)
+    , hdrMultisampleTexture_(nullptr)
+    , hdrMultisampleTextureView_(nullptr)
+    , hdrResolveTexture_(nullptr)
+    , hdrResolveTextureView_(nullptr)
+    , multisampleDepthTexture_(nullptr)
+    , multisampleDepthTextureView_(nullptr)
 
     // Extra textures
     , whiteTexture_(createWhiteTexture(device_, queue_))
@@ -309,10 +324,10 @@ Engine::Impl::~Impl()
     if (blurShadowXBindGroup_) wgpuBindGroupRelease(blurShadowXBindGroup_);
     if (blurShadowYBindGroup_) wgpuBindGroupRelease(blurShadowYBindGroup_);
 
-    if (frameTexture_) wgpuTextureRelease(frameTexture_);
-    if (frameTextureView_) wgpuTextureViewRelease(frameTextureView_);
-    if (depthTexture_) wgpuTextureRelease(depthTexture_);
-    if (depthTextureView_) wgpuTextureViewRelease(depthTextureView_);
+    if (hdrMultisampleTexture_) wgpuTextureRelease(hdrMultisampleTexture_);
+    if (hdrMultisampleTextureView_) wgpuTextureViewRelease(hdrMultisampleTextureView_);
+    if (multisampleDepthTexture_) wgpuTextureRelease(multisampleDepthTexture_);
+    if (multisampleDepthTextureView_) wgpuTextureViewRelease(multisampleDepthTextureView_);
 
     if (whiteTexture_) wgpuTextureRelease(whiteTexture_);
 
@@ -507,18 +522,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     for (auto task : renderQueue_.grab())
         task();
 
-    WGPUTextureFormat surfaceFormat = wgpuTextureGetFormat(target);
-
-    if (!mainPipeline_)
-        mainPipeline_ = createMainPipeline(device_, mainPipelineLayout_, surfaceFormat, shaderModule_);
-
-    if (!envPipeline_)
-        envPipeline_ = createEnvPipeline(device_, envPipelineLayout_, surfaceFormat, shaderModule_);
-
-    if (!renderWaterPipeline_)
-        renderWaterPipeline_ = createRenderWaterPipeline(device_, renderWaterPipelineLayout_, surfaceFormat, shaderModule_);
-
-    updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)}, surfaceFormat);
+    updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
 
     updateObjectUniformBuffer(objects);
 
@@ -526,8 +530,6 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     updateCameraBuffer(camera, settings, cameraUniformBuffer_, {wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
     simulateCloth(objects, camera, settings, settings.paused ? 0 : 16);
-
-    WGPUTextureView targetView = createTextureView(target);
 
     glm::mat4 shadowProjection = computeShadowProjection(settings.sunDirection, sceneBbox);
 
@@ -539,9 +541,14 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     updateCameraBuffer(camera, settings, cameraUniformBuffer_, {wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
     updateLightsUniformBuffer(shadowProjection, settings, pointLightCount);
 
-    renderEnv(targetView);
-    renderMain(objects, targetView);
-//    renderWater(targetView);
+    renderEnv();
+    renderMain(objects);
+    renderWater();
+
+    WGPUTextureFormat surfaceFormat = wgpuTextureGetFormat(target);
+    WGPUTextureView targetView = createTextureView(target);
+
+    renderLDR(targetView, surfaceFormat);
 
     wgpuTextureViewRelease(targetView);
 }
@@ -1086,11 +1093,11 @@ void Engine::Impl::blurShadow()
     wgpuCommandEncoderRelease(commandEncoder);
 }
 
-void Engine::Impl::renderEnv(WGPUTextureView targetView)
+void Engine::Impl::renderEnv()
 {
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPass = createEnvRenderPass(commandEncoder, frameTextureView_, targetView);
+    WGPURenderPassEncoder renderPass = createEnvRenderPass(commandEncoder, hdrMultisampleTextureView_, hdrResolveTextureView_);
     wgpuRenderPassEncoderSetPipeline(renderPass, envPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 1, emptyBindGroup_, 0, nullptr);
@@ -1108,11 +1115,11 @@ void Engine::Impl::renderEnv(WGPUTextureView targetView)
     wgpuCommandEncoderRelease(commandEncoder);
 }
 
-void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView)
+void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects)
 {
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPass = createMainRenderPass(commandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(1.f));
+    WGPURenderPassEncoder renderPass = createMainRenderPass(commandEncoder, hdrMultisampleTextureView_, multisampleDepthTextureView_, hdrResolveTextureView_, glm::vec4(1.f));
     wgpuRenderPassEncoderSetPipeline(renderPass, mainPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 3, lightsBindGroup_, 0, nullptr);
@@ -1142,14 +1149,14 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
     wgpuCommandEncoderRelease(commandEncoder);
 }
 
-void Engine::Impl::renderWater(WGPUTextureView targetView)
+void Engine::Impl::renderWater()
 {
     if (!waterGridVertexBuffer_)
         return;
 
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPass = createWaterRenderPass(commandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(1.f));
+    WGPURenderPassEncoder renderPass = createWaterRenderPass(commandEncoder, hdrMultisampleTextureView_, multisampleDepthTextureView_, hdrResolveTextureView_, glm::vec4(1.f));
     wgpuRenderPassEncoderSetPipeline(renderPass, renderWaterPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
 
@@ -1167,47 +1174,92 @@ void Engine::Impl::renderWater(WGPUTextureView targetView)
     wgpuCommandEncoderRelease(commandEncoder);
 }
 
-void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat)
+void Engine::Impl::renderLDR(WGPUTextureView targetView, WGPUTextureFormat surfaceFormat)
 {
-    if (!frameTexture_ || cachedRenderTargetSize_ != renderTargetSize)
+    if (!ldrPipeline_)
+        ldrPipeline_ = createLDRPipeline(device_, ldrPipelineLayout_, ldrShaderModule_, surfaceFormat);
+
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPURenderPassEncoder renderPass = createLDRRenderPass(commandEncoder, targetView);
+    wgpuRenderPassEncoderSetPipeline(renderPass, ldrPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 0, hdrBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+
+    wgpuRenderPassEncoderEnd(renderPass);
+    wgpuRenderPassEncoderRelease(renderPass);
+
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
+}
+
+void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize)
+{
+    if (!hdrMultisampleTexture_ || cachedRenderTargetSize_ != renderTargetSize)
     {
-        if (frameTexture_)
+        if (hdrMultisampleTexture_)
         {
-            wgpuTextureViewRelease(frameTextureView_);
-            wgpuTextureRelease(frameTexture_);
-            wgpuTextureViewRelease(depthTextureView_);
-            wgpuTextureRelease(depthTexture_);
+            wgpuTextureViewRelease(hdrMultisampleTextureView_);
+            wgpuTextureRelease(hdrMultisampleTexture_);
+            wgpuTextureViewRelease(multisampleDepthTextureView_);
+            wgpuTextureRelease(multisampleDepthTexture_);
         }
 
-        WGPUTextureDescriptor frameTextureDescriptor;
-        frameTextureDescriptor.nextInChain = nullptr;
-        frameTextureDescriptor.label = nullptr;
-        frameTextureDescriptor.usage = WGPUTextureUsage_RenderAttachment;
-        frameTextureDescriptor.dimension = WGPUTextureDimension_2D;
-        frameTextureDescriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
-        frameTextureDescriptor.format = surfaceFormat;
-        frameTextureDescriptor.mipLevelCount = 1;
-        frameTextureDescriptor.sampleCount = 4;
-        frameTextureDescriptor.viewFormatCount = 0;
-        frameTextureDescriptor.viewFormats = nullptr;
+        {
+            WGPUTextureDescriptor descriptor;
+            descriptor.nextInChain = nullptr;
+            descriptor.label = nullptr;
+            descriptor.usage = WGPUTextureUsage_RenderAttachment;
+            descriptor.dimension = WGPUTextureDimension_2D;
+            descriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
+            descriptor.format = WGPUTextureFormat_RGBA16Float;
+            descriptor.mipLevelCount = 1;
+            descriptor.sampleCount = 4;
+            descriptor.viewFormatCount = 0;
+            descriptor.viewFormats = nullptr;
 
-        frameTexture_ = wgpuDeviceCreateTexture(device_, &frameTextureDescriptor);
-        frameTextureView_ = createTextureView(frameTexture_);
+            hdrMultisampleTexture_ = wgpuDeviceCreateTexture(device_, &descriptor);
+            hdrMultisampleTextureView_ = createTextureView(hdrMultisampleTexture_);
+        }
 
-        WGPUTextureDescriptor depthTextureDescriptor;
-        depthTextureDescriptor.nextInChain = nullptr;
-        depthTextureDescriptor.label = nullptr;
-        depthTextureDescriptor.usage = WGPUTextureUsage_RenderAttachment;
-        depthTextureDescriptor.dimension = WGPUTextureDimension_2D;
-        depthTextureDescriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
-        depthTextureDescriptor.format = WGPUTextureFormat_Depth24Plus;
-        depthTextureDescriptor.mipLevelCount = 1;
-        depthTextureDescriptor.sampleCount = 4;
-        depthTextureDescriptor.viewFormatCount = 0;
-        depthTextureDescriptor.viewFormats = nullptr;
+        {
+            WGPUTextureDescriptor descriptor;
+            descriptor.nextInChain = nullptr;
+            descriptor.label = nullptr;
+            descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+            descriptor.dimension = WGPUTextureDimension_2D;
+            descriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
+            descriptor.format = WGPUTextureFormat_RGBA16Float;
+            descriptor.mipLevelCount = 1;
+            descriptor.sampleCount = 1;
+            descriptor.viewFormatCount = 0;
+            descriptor.viewFormats = nullptr;
 
-        depthTexture_ = wgpuDeviceCreateTexture(device_, &depthTextureDescriptor);
-        depthTextureView_ = createTextureView(depthTexture_);
+            hdrResolveTexture_ = wgpuDeviceCreateTexture(device_, &descriptor);
+            hdrResolveTextureView_ = createTextureView(hdrResolveTexture_);
+        }
+
+        {
+            WGPUTextureDescriptor descriptor;
+            descriptor.nextInChain = nullptr;
+            descriptor.label = nullptr;
+            descriptor.usage = WGPUTextureUsage_RenderAttachment;
+            descriptor.dimension = WGPUTextureDimension_2D;
+            descriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
+            descriptor.format = WGPUTextureFormat_Depth24Plus;
+            descriptor.mipLevelCount = 1;
+            descriptor.sampleCount = 4;
+            descriptor.viewFormatCount = 0;
+            descriptor.viewFormats = nullptr;
+
+            multisampleDepthTexture_ = wgpuDeviceCreateTexture(device_, &descriptor);
+            multisampleDepthTextureView_ = createTextureView(multisampleDepthTexture_);
+        }
+
+        hdrBindGroup_ = createHDRBindGroup(device_, hdrBindGroupLayout_, hdrResolveTextureView_);
 
         cachedRenderTargetSize_ = renderTargetSize;
     }

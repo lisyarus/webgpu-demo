@@ -104,32 +104,6 @@ fn vertexMain(in : VertexInput) -> VertexOutput {
     return VertexOutput(position, worldPosition, normal, tangent, in.texcoord);
 }
 
-fn Uncharted2TonemapImpl(x : vec3f) -> vec3f {
-    let A = 0.15;
-    let B = 0.50;
-    let C = 0.10;
-    let D = 0.20;
-    let E = 0.02;
-    let F = 0.30;
-
-    return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
-}
-
-fn ACESFilm(x : vec3f) -> vec3f {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-
-    return saturate((x*(a*x+b))/(x*(c*x+d)+e));
-}
-
-fn tonemap(x : vec3f) -> vec3f {
-    return Uncharted2TonemapImpl(x) / Uncharted2TonemapImpl(vec3f(3.0));
-//    return ACESFilm(x);
-}
-
 fn perspectiveDivide(p : vec4f) -> vec3f {
     return p.xyz / p.w;
 }
@@ -323,7 +297,7 @@ fn fragmentMain(in : VertexOutput, @builtin(front_facing) front_facing : bool) -
 
     let shockColor = mix(litColor, lights.sunIntensity * 0.3, shockFactor);
 
-    return vec4f(tonemap(shockColor), baseColorSample.a);
+    return vec4f(shockColor, baseColorSample.a);
 }
 
 struct ShadowVertexInput {
@@ -384,7 +358,7 @@ fn envFragmentMain(in : EnvVertexOutput) -> @location(0) vec4f {
 
     let sunCircle = smoothstep(0.9999, 0.99999, dot(direction, lights.sunDirection)) * lights.sunIntensity;
 
-    return vec4f(tonemap(sampleEnvMap(direction) + sunCircle), 1.0);
+    return vec4f(sampleEnvMap(direction) + sunCircle, 1.0);
 }
 
 struct WaterVertexInput {
@@ -713,6 +687,58 @@ fn simulateClothCopy(@builtin(global_invocation_id) id : vec3u) {
 
     clothVertices[id.x].oldVelocity = clothVertices[id.x].velocity;
     setPosition(id.x, clothVertices[id.x].newPosition);
+}
+
+)";
+
+const char ldrShader[] =
+R"(
+
+@group(0) @binding(0) var hdrTexture : texture_2d<f32>;
+
+@vertex
+fn ldrVertexMain(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
+    if (index == 0u) {
+        return vec4f(-1.0, -1.0, 0.0, 1.0);
+    }
+    else if (index == 1u) {
+        return vec4f( 3.0, -1.0, 0.0, 1.0);
+    }
+    else {
+        return vec4f(-1.0,  3.0, 0.0, 1.0);
+    }
+}
+
+fn Uncharted2TonemapImpl(x : vec3f) -> vec3f {
+    let A = 0.15;
+    let B = 0.50;
+    let C = 0.10;
+    let D = 0.20;
+    let E = 0.02;
+    let F = 0.30;
+
+    return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
+
+fn ACESFilm(x : vec3f) -> vec3f {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+
+    return saturate((x*(a*x+b))/(x*(c*x+d)+e));
+}
+
+fn tonemap(x : vec3f) -> vec3f {
+    return Uncharted2TonemapImpl(x) / Uncharted2TonemapImpl(vec3f(3.0));
+//    return ACESFilm(x);
+}
+
+@fragment
+fn ldrFragmentMain(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
+    let color = textureLoad(hdrTexture, vec2u(fragCoord.xy), 0).rgb;
+    return vec4f(tonemap(color), 1.0);
 }
 
 )";
@@ -1287,6 +1313,37 @@ WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[1];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Fragment;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = 0;
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 1;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
 {
     WGPUPipelineLayoutDescriptor descriptor;
@@ -1298,11 +1355,11 @@ WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list
     return wgpuDeviceCreatePipelineLayout(device, &descriptor);
 }
 
-WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule)
+WGPURenderPipeline createMainPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
 {
     WGPUColorTargetState colorTargetState;
     colorTargetState.nextInChain = nullptr;
-    colorTargetState.format = surfaceFormat;
+    colorTargetState.format = WGPUTextureFormat_RGBA16Float;
     colorTargetState.blend = nullptr;
     colorTargetState.writeMask = WGPUColorWriteMask_All;
 
@@ -1459,11 +1516,11 @@ WGPURenderPipeline createShadowPipeline(WGPUDevice device, WGPUPipelineLayout pi
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
 }
 
-WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule)
+WGPURenderPipeline createEnvPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
 {
     WGPUColorTargetState colorTargetState;
     colorTargetState.nextInChain = nullptr;
-    colorTargetState.format = surfaceFormat;
+    colorTargetState.format = WGPUTextureFormat_RGBA16Float;
     colorTargetState.blend = nullptr;
     colorTargetState.writeMask = WGPUColorWriteMask_All;
 
@@ -1607,11 +1664,11 @@ WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipel
     return wgpuDeviceCreateComputePipeline(device, &descriptor);
 }
 
-WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule)
+WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
 {
     WGPUColorTargetState colorTargetState;
     colorTargetState.nextInChain = nullptr;
-    colorTargetState.format = surfaceFormat;
+    colorTargetState.format = WGPUTextureFormat_RGBA16Float;
     colorTargetState.blend = nullptr;
     colorTargetState.writeMask = WGPUColorWriteMask_All;
 
@@ -1675,6 +1732,49 @@ WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayo
     descriptor.multisample.count = 4;
     descriptor.multisample.mask = -1;
     descriptor.multisample.alphaToCoverageEnabled = true;
+    descriptor.fragment = &fragmentState;
+
+    return wgpuDeviceCreateRenderPipeline(device, &descriptor);
+}
+
+WGPURenderPipeline createLDRPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat)
+{
+    WGPUColorTargetState colorTargetState;
+    colorTargetState.nextInChain = nullptr;
+    colorTargetState.format = surfaceFormat;
+    colorTargetState.blend = nullptr;
+    colorTargetState.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState;
+    fragmentState.nextInChain = nullptr;
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = "ldrFragmentMain";
+    fragmentState.constantCount = 0;
+    fragmentState.constants = nullptr;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTargetState;
+
+    WGPURenderPipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "ldr";
+    descriptor.layout = pipelineLayout;
+    descriptor.nextInChain = nullptr;
+    descriptor.vertex.module = shaderModule;
+    descriptor.vertex.entryPoint = "ldrVertexMain";
+    descriptor.vertex.constantCount = 0;
+    descriptor.vertex.constants = nullptr;
+    descriptor.vertex.bufferCount = 0;
+    descriptor.vertex.buffers = nullptr;
+    descriptor.primitive.nextInChain = nullptr;
+    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+    descriptor.primitive.frontFace = WGPUFrontFace_CCW;
+    descriptor.primitive.cullMode = WGPUCullMode_None;
+    descriptor.depthStencil = nullptr;
+    descriptor.multisample.nextInChain = nullptr;
+    descriptor.multisample.count = 1;
+    descriptor.multisample.mask = -1;
+    descriptor.multisample.alphaToCoverageEnabled = false;
     descriptor.fragment = &fragmentState;
 
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
@@ -1899,6 +1999,28 @@ WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout b
     return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
+WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input)
+{
+    WGPUBindGroupEntry entries[1];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].buffer = 0;
+    entries[0].offset = 0;
+    entries[0].size = 0;
+    entries[0].sampler = nullptr;
+    entries[0].textureView = input;
+
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 1;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
+}
+
 WGPUTextureView createTextureView(WGPUTexture texture, int level)
 {
     return createTextureView(texture, level, wgpuTextureGetFormat(texture));
@@ -2034,6 +2156,28 @@ WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGP
     colorAttachment.nextInChain = nullptr;
     colorAttachment.view = colorTarget;
     colorAttachment.resolveTarget = resolveTarget;
+    colorAttachment.loadOp = WGPULoadOp_Clear;
+    colorAttachment.storeOp = WGPUStoreOp_Store;
+    colorAttachment.clearValue = {0.0, 0.0, 0.0, 0.0};
+
+    WGPURenderPassDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &colorAttachment;
+    descriptor.depthStencilAttachment = nullptr;
+    descriptor.occlusionQuerySet = nullptr;
+    descriptor.timestampWrites = nullptr;
+
+    return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
+}
+
+WGPURenderPassEncoder createLDRRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView target)
+{
+    WGPURenderPassColorAttachment colorAttachment;
+    colorAttachment.nextInChain = nullptr;
+    colorAttachment.view = target;
+    colorAttachment.resolveTarget = nullptr;
     colorAttachment.loadOp = WGPULoadOp_Clear;
     colorAttachment.storeOp = WGPUStoreOp_Store;
     colorAttachment.clearValue = {0.0, 0.0, 0.0, 0.0};
