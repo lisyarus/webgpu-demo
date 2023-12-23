@@ -387,6 +387,31 @@ fn envFragmentMain(in : EnvVertexOutput) -> @location(0) vec4f {
     return vec4f(tonemap(sampleEnvMap(direction) + sunCircle), 1.0);
 }
 
+struct WaterVertexInput {
+    @builtin(vertex_index) index : u32,
+    @location(0) position : vec2f,
+}
+
+struct WaterVertexOutput {
+    @builtin(position) position : vec4f,
+    @location(0) color : vec4f,
+}
+
+@vertex
+fn waterVertexMain(in : WaterVertexInput) -> WaterVertexOutput {
+    let position = camera.viewProjection * vec4f(in.position.x, 0.0, in.position.y, 1.0);
+
+    let cid = in.index % 7u;
+    let color = vec4f(f32(cid % 2u), f32((cid / 2u) % 2u), f32((cid / 4u) % 2u), 1.0);
+
+    return WaterVertexOutput(position, color);
+}
+
+@fragment
+fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
+    return in.color;
+}
+
 )";
 
 const char genMipmapShader[] =
@@ -1582,6 +1607,79 @@ WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipel
     return wgpuDeviceCreateComputePipeline(device, &descriptor);
 }
 
+WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule)
+{
+    WGPUColorTargetState colorTargetState;
+    colorTargetState.nextInChain = nullptr;
+    colorTargetState.format = surfaceFormat;
+    colorTargetState.blend = nullptr;
+    colorTargetState.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState;
+    fragmentState.nextInChain = nullptr;
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = "waterFragmentMain";
+    fragmentState.constantCount = 0;
+    fragmentState.constants = nullptr;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTargetState;
+
+    WGPUVertexAttribute attributes[1];
+    attributes[0].format = WGPUVertexFormat_Float32x2;
+    attributes[0].offset = 0;
+    attributes[0].shaderLocation = 0;
+
+    WGPUVertexBufferLayout vertexBufferLayout;
+    vertexBufferLayout.arrayStride = sizeof(glm::vec2);
+    vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+    vertexBufferLayout.attributeCount = 1;
+    vertexBufferLayout.attributes = attributes;
+
+    WGPUDepthStencilState depthStencilState;
+    depthStencilState.nextInChain = nullptr;
+    depthStencilState.format = WGPUTextureFormat_Depth24Plus;
+    depthStencilState.depthWriteEnabled = true;
+    depthStencilState.depthCompare = WGPUCompareFunction_Less;
+    depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
+    depthStencilState.stencilFront.failOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilFront.passOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilBack.compare = WGPUCompareFunction_Always;
+    depthStencilState.stencilBack.failOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilBack.depthFailOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilBack.passOp = WGPUStencilOperation_Keep;
+    depthStencilState.stencilReadMask = 0;
+    depthStencilState.stencilWriteMask = 0;
+    depthStencilState.depthBias = 0;
+    depthStencilState.depthBiasSlopeScale = 0.f;
+    depthStencilState.depthBiasClamp = 0.f;
+
+    WGPURenderPipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "water";
+    descriptor.layout = pipelineLayout;
+    descriptor.nextInChain = nullptr;
+    descriptor.vertex.module = shaderModule;
+    descriptor.vertex.entryPoint = "waterVertexMain";
+    descriptor.vertex.constantCount = 0;
+    descriptor.vertex.constants = nullptr;
+    descriptor.vertex.bufferCount = 1;
+    descriptor.vertex.buffers = &vertexBufferLayout;
+    descriptor.primitive.nextInChain = nullptr;
+    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+    descriptor.primitive.frontFace = WGPUFrontFace_CCW;
+    descriptor.primitive.cullMode = WGPUCullMode_None;
+    descriptor.depthStencil = &depthStencilState;
+    descriptor.multisample.nextInChain = nullptr;
+    descriptor.multisample.count = 4;
+    descriptor.multisample.mask = -1;
+    descriptor.multisample.alphaToCoverageEnabled = true;
+    descriptor.fragment = &fragmentState;
+
+    return wgpuDeviceCreateRenderPipeline(device, &descriptor);
+}
+
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
 {
     WGPUBufferDescriptor descriptor;
@@ -1844,6 +1942,39 @@ WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WG
     WGPURenderPassDepthStencilAttachment depthStencilAttachment;
     depthStencilAttachment.view = depthTarget;
     depthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+    depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+    depthStencilAttachment.depthClearValue = 1.f;
+    depthStencilAttachment.depthReadOnly = false;
+    depthStencilAttachment.stencilLoadOp = WGPULoadOp_Undefined;
+    depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Undefined;
+    depthStencilAttachment.stencilClearValue = 0;
+    depthStencilAttachment.stencilReadOnly = true;
+
+    WGPURenderPassDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &colorAttachment;
+    descriptor.depthStencilAttachment = &depthStencilAttachment;
+    descriptor.occlusionQuerySet = nullptr;
+    descriptor.timestampWrites = nullptr;
+
+    return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
+}
+
+WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor)
+{
+    WGPURenderPassColorAttachment colorAttachment;
+    colorAttachment.nextInChain = nullptr;
+    colorAttachment.view = colorTarget;
+    colorAttachment.resolveTarget = resolveTarget;
+    colorAttachment.loadOp = WGPULoadOp_Load;
+    colorAttachment.storeOp = WGPUStoreOp_Store;
+    colorAttachment.clearValue = {clearColor.r, clearColor.g, clearColor.b, clearColor.a};
+
+    WGPURenderPassDepthStencilAttachment depthStencilAttachment;
+    depthStencilAttachment.view = depthTarget;
+    depthStencilAttachment.depthLoadOp = WGPULoadOp_Load;
     depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
     depthStencilAttachment.depthClearValue = 1.f;
     depthStencilAttachment.depthReadOnly = false;

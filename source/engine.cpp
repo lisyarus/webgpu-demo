@@ -83,6 +83,8 @@ private:
     WGPUPipelineLayout simulateClothPipelineLayout_;
     WGPUComputePipeline simulateClothPipeline_;
     WGPUComputePipeline simulateClothCopyPipeline_;
+    WGPUPipelineLayout renderWaterPipelineLayout_;
+    WGPURenderPipeline renderWaterPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -113,6 +115,7 @@ private:
     WGPUTexture whiteTexture_;
 
     Box waterBbox_;
+    glm::ivec2 waterCellCount_;
     WGPUBuffer waterGridVertexBuffer_;
     WGPUBuffer waterGridIndexBuffer_;
 
@@ -123,6 +126,7 @@ private:
     void blurShadow();
     void renderEnv(WGPUTextureView targetView);
     void renderMain(std::vector<RenderObjectPtr> const & objects, WGPUTextureView targetView);
+    void renderWater(WGPUTextureView targetView);
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize, WGPUTextureFormat surfaceFormat);
     void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer, glm::ivec2 const & viewport);
@@ -192,6 +196,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , simulateClothPipelineLayout_(createPipelineLayout(device_, {simulateClothBindGroupLayout_, cameraBindGroupLayout_}))
     , simulateClothPipeline_(createSimulateClothPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
     , simulateClothCopyPipeline_(createSimulateClothCopyPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
+    , renderWaterPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_}))
+    , renderWaterPipeline_(nullptr)
 
     // Uniform buffers
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
@@ -228,6 +234,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
 
     // Water
     , waterBbox_{{0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}}
+    , waterCellCount_{0, 0}
     , waterGridVertexBuffer_(nullptr)
     , waterGridIndexBuffer_(nullptr)
 {
@@ -432,33 +439,33 @@ void Engine::Impl::setWaterBbox(Box const & box)
 
     int const maxDimensionCellCount = 1024;
 
-    glm::ivec2 const cellCount
+    waterCellCount_ =
     {
         std::round((boxSize.x * maxDimensionCellCount) / maxDimension),
-        std::round((boxSize.y * maxDimensionCellCount) / maxDimension)
+        std::round((boxSize.z * maxDimensionCellCount) / maxDimension)
     };
 
     glm::vec2 const cellSize
     {
-        boxSize.x / cellCount.x,
-        boxSize.y / cellCount.y,
+        boxSize.x / waterCellCount_.x,
+        boxSize.z / waterCellCount_.y,
     };
 
     std::vector<glm::vec2> gridVertices;
     std::vector<std::uint32_t> gridIndices;
 
-    for (int y = 0; y <= cellCount.y; ++y)
-        for (int x = 0; x <= cellCount.x; ++x)
-            gridVertices.push_back(glm::vec2(box.min) + glm::vec2(x, y) * cellSize);
+    for (int y = 0; y <= waterCellCount_.y; ++y)
+        for (int x = 0; x <= waterCellCount_.x; ++x)
+            gridVertices.push_back(glm::vec2(box.min.x, box.min.z) + glm::vec2(x, y) * cellSize);
 
-    for (int y = 0; y < cellCount.y; ++y)
+    for (int y = 0; y < waterCellCount_.y; ++y)
     {
-        for (int x = 0; x < cellCount.x; ++x)
+        for (int x = 0; x < waterCellCount_.x; ++x)
         {
-            std::uint32_t i00 = (y + 0) * (cellCount.x + 1) + x + 0;
-            std::uint32_t i01 = (y + 0) * (cellCount.x + 1) + x + 1;
-            std::uint32_t i10 = (y + 1) * (cellCount.x + 1) + x + 0;
-            std::uint32_t i11 = (y + 1) * (cellCount.x + 1) + x + 1;
+            std::uint32_t i00 = (y + 0) * (waterCellCount_.x + 1) + x + 0;
+            std::uint32_t i01 = (y + 0) * (waterCellCount_.x + 1) + x + 1;
+            std::uint32_t i10 = (y + 1) * (waterCellCount_.x + 1) + x + 0;
+            std::uint32_t i11 = (y + 1) * (waterCellCount_.x + 1) + x + 1;
 
             gridIndices.insert(gridIndices.end(), {i00, i01, i10, i10, i01, i11});
         }
@@ -508,6 +515,9 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     if (!envPipeline_)
         envPipeline_ = createEnvPipeline(device_, envPipelineLayout_, surfaceFormat, shaderModule_);
 
+    if (!renderWaterPipeline_)
+        renderWaterPipeline_ = createRenderWaterPipeline(device_, renderWaterPipelineLayout_, surfaceFormat, shaderModule_);
+
     updateFrameBuffer({wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)}, surfaceFormat);
 
     updateObjectUniformBuffer(objects);
@@ -531,6 +541,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     renderEnv(targetView);
     renderMain(objects, targetView);
+//    renderWater(targetView);
 
     wgpuTextureViewRelease(targetView);
 }
@@ -1120,6 +1131,31 @@ void Engine::Impl::renderMain(std::vector<RenderObjectPtr> const & objects, WGPU
         wgpuRenderPassEncoderSetIndexBuffer(renderPass, object->common->indexBuffer, object->indexFormat, object->indices.byteOffset, object->indices.byteLength);
         wgpuRenderPassEncoderDrawIndexed(renderPass, object->indices.count, 1, 0, 0, 0);
     }
+
+    wgpuRenderPassEncoderEnd(renderPass);
+    wgpuRenderPassEncoderRelease(renderPass);
+
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
+}
+
+void Engine::Impl::renderWater(WGPUTextureView targetView)
+{
+    if (!waterGridVertexBuffer_)
+        return;
+
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPURenderPassEncoder renderPass = createWaterRenderPass(commandEncoder, frameTextureView_, depthTextureView_, targetView, glm::vec4(1.f));
+    wgpuRenderPassEncoderSetPipeline(renderPass, renderWaterPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
+
+    wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, waterGridVertexBuffer_, 0, wgpuBufferGetSize(waterGridVertexBuffer_));
+    wgpuRenderPassEncoderSetIndexBuffer(renderPass, waterGridIndexBuffer_, WGPUIndexFormat_Uint32, 0, wgpuBufferGetSize(waterGridIndexBuffer_));
+    wgpuRenderPassEncoderDrawIndexed(renderPass, waterCellCount_.x * waterCellCount_.y * 6, 1, 0, 0, 0);
 
     wgpuRenderPassEncoderEnd(renderPass);
     wgpuRenderPassEncoderRelease(renderPass);

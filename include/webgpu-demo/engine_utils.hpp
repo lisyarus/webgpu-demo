@@ -118,6 +118,7 @@ WGPUComputePipeline createBlurShadowXPipeline(WGPUDevice device, WGPUPipelineLay
 WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUTextureFormat surfaceFormat, WGPUShaderModule shaderModule);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 WGPUBuffer createStorageBuffer(WGPUDevice device, std::uint64_t size);
@@ -137,6 +138,7 @@ WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFor
 WGPUCommandEncoder createCommandEncoder(WGPUDevice device);
 
 WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
+WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
 WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget);
 WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget);
 WGPUComputePassEncoder createComputePass(WGPUCommandEncoder commandEncoder);

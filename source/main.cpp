@@ -36,6 +36,7 @@ int main(int argc, char ** argv)
     }
 
     auto sceneBbox = engine.bbox(renderObjects);
+    engine.setWaterBbox(sceneBbox);
 
     Camera camera;
     camera.move({-9.f, 1.5f, -0.25f});
