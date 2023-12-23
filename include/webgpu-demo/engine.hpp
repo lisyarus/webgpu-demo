@@ -24,6 +24,8 @@ struct Engine
 
     void setEnvMap(std::filesystem::path const & hdrImagePath);
 
+    void setWaterBbox(Box const & box);
+
     Box bbox(std::vector<RenderObjectPtr> const & objects) const;
 
     struct Settings

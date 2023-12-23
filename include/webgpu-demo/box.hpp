@@ -20,4 +20,9 @@ struct Box
         max = glm::max(max, b.max);
         return *this;
     }
+
+    glm::vec3 diagonal() const
+    {
+        return max - min;
+    }
 };

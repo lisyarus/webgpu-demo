@@ -22,6 +22,7 @@ struct Engine::Impl
     ~Impl();
 
     void setEnvMap(std::filesystem::path const & hdrImagePath);
+    void setWaterBbox(Box const & box);
     void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
@@ -110,6 +111,10 @@ private:
     WGPUTextureView depthTextureView_;
 
     WGPUTexture whiteTexture_;
+
+    Box waterBbox_;
+    WGPUBuffer waterGridVertexBuffer_;
+    WGPUBuffer waterGridIndexBuffer_;
 
     glm::uvec2 cachedRenderTargetSize_{0, 0};
 
@@ -220,6 +225,11 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
 
     // Extra textures
     , whiteTexture_(createWhiteTexture(device_, queue_))
+
+    // Water
+    , waterBbox_{{0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}}
+    , waterGridVertexBuffer_(nullptr)
+    , waterGridIndexBuffer_(nullptr)
 {
     recreateLightsBindGroup();
 }
@@ -410,6 +420,79 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
             recreateLightsBindGroup();
         });
     });
+}
+
+void Engine::Impl::setWaterBbox(Box const & box)
+{
+    waterBbox_ = box;
+
+    auto const boxSize = box.diagonal();
+
+    float const maxDimension = std::max(boxSize.x, boxSize.y);
+
+    int const maxDimensionCellCount = 1024;
+
+    glm::ivec2 const cellCount
+    {
+        std::round((boxSize.x * maxDimensionCellCount) / maxDimension),
+        std::round((boxSize.y * maxDimensionCellCount) / maxDimension)
+    };
+
+    glm::vec2 const cellSize
+    {
+        boxSize.x / cellCount.x,
+        boxSize.y / cellCount.y,
+    };
+
+    std::vector<glm::vec2> gridVertices;
+    std::vector<std::uint32_t> gridIndices;
+
+    for (int y = 0; y <= cellCount.y; ++y)
+        for (int x = 0; x <= cellCount.x; ++x)
+            gridVertices.push_back(glm::vec2(box.min) + glm::vec2(x, y) * cellSize);
+
+    for (int y = 0; y < cellCount.y; ++y)
+    {
+        for (int x = 0; x < cellCount.x; ++x)
+        {
+            std::uint32_t i00 = (y + 0) * (cellCount.x + 1) + x + 0;
+            std::uint32_t i01 = (y + 0) * (cellCount.x + 1) + x + 1;
+            std::uint32_t i10 = (y + 1) * (cellCount.x + 1) + x + 0;
+            std::uint32_t i11 = (y + 1) * (cellCount.x + 1) + x + 1;
+
+            gridIndices.insert(gridIndices.end(), {i00, i01, i10, i10, i01, i11});
+        }
+    }
+
+    if (waterGridVertexBuffer_)
+        wgpuBufferRelease(waterGridVertexBuffer_);
+
+    if (waterGridIndexBuffer_)
+        wgpuBufferRelease(waterGridIndexBuffer_);
+
+    {
+        WGPUBufferDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+        descriptor.size = gridVertices.size() * sizeof(gridVertices[0]);
+        descriptor.mappedAtCreation = false;
+
+        waterGridVertexBuffer_ = wgpuDeviceCreateBuffer(device_, &descriptor);
+        wgpuQueueWriteBuffer(queue_, waterGridVertexBuffer_, 0, gridVertices.data(), gridVertices.size() * sizeof(gridVertices[0]));
+    }
+
+    {
+        WGPUBufferDescriptor descriptor;
+        descriptor.nextInChain = nullptr;
+        descriptor.label = nullptr;
+        descriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index;
+        descriptor.size = gridIndices.size() * sizeof(gridIndices[0]);
+        descriptor.mappedAtCreation = false;
+
+        waterGridIndexBuffer_ = wgpuDeviceCreateBuffer(device_, &descriptor);
+        wgpuQueueWriteBuffer(queue_, waterGridIndexBuffer_, 0, gridIndices.data(), gridIndices.size() * sizeof(gridIndices[0]));
+    }
 }
 
 void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)
@@ -1347,6 +1430,11 @@ std::vector<RenderObjectPtr> Engine::loadGLTF(std::filesystem::path const & asse
 void Engine::setEnvMap(std::filesystem::path const & hdrImagePath)
 {
     pimpl_->setEnvMap(hdrImagePath);
+}
+
+void Engine::setWaterBbox(Box const & box)
+{
+    pimpl_->setWaterBbox(box);
 }
 
 void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)
