@@ -47,6 +47,7 @@ private:
     WGPUBindGroupLayout genMipmapEnvBindGroupLayout_;
     WGPUBindGroupLayout blurShadowBindGroupLayout_;
     WGPUBindGroupLayout simulateClothBindGroupLayout_;
+    WGPUBindGroupLayout waterBindGroupLayout_;
     WGPUBindGroupLayout hdrBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
@@ -110,12 +111,15 @@ private:
     WGPUBindGroup lightsBindGroup_;
     WGPUBindGroup blurShadowXBindGroup_;
     WGPUBindGroup blurShadowYBindGroup_;
+    WGPUBindGroup waterBindGroup_;
     WGPUBindGroup hdrBindGroup_;
 
     WGPUTexture hdrMultisampleTexture_;
     WGPUTextureView hdrMultisampleTextureView_;
     WGPUTexture hdrResolveTexture_;
     WGPUTextureView hdrResolveTextureView_;
+    WGPUTexture hdrWaterTexture_;
+    WGPUTextureView hdrWaterTextureView_;
     WGPUTexture multisampleDepthTexture_;
     WGPUTextureView multisampleDepthTextureView_;
 
@@ -164,6 +168,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , genMipmapEnvBindGroupLayout_(createGenEnvMipmapBindGroupLayout(device_))
     , blurShadowBindGroupLayout_(createBlurShadowBindGroupLayout(device_))
     , simulateClothBindGroupLayout_(createSimulateClothBindGroupLayout(device_))
+    , waterBindGroupLayout_(createWaterBindGroupLayout(device_))
     , hdrBindGroupLayout_(createHDRBindGroupLayout(device_))
 
     // Shader modules
@@ -206,7 +211,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , simulateClothPipelineLayout_(createPipelineLayout(device_, {simulateClothBindGroupLayout_, cameraBindGroupLayout_}))
     , simulateClothPipeline_(createSimulateClothPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
     , simulateClothCopyPipeline_(createSimulateClothCopyPipeline(device_, simulateClothPipelineLayout_, simulateClothShaderModule_))
-    , renderWaterPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_}))
+    , renderWaterPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, emptyBindGroupLayout_, emptyBindGroupLayout_, lightsBindGroupLayout_, waterBindGroupLayout_}))
     , renderWaterPipeline_(createRenderWaterPipeline(device_, renderWaterPipelineLayout_, shaderModule_))
     , ldrPipelineLayout_(createPipelineLayout(device_, {hdrBindGroupLayout_}))
     , ldrPipeline_(nullptr)
@@ -234,6 +239,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , lightsBindGroup_(nullptr)
     , blurShadowXBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapView_, shadowMapAuxView_))
     , blurShadowYBindGroup_(createBlurShadowBindGroup(device_, blurShadowBindGroupLayout_, shadowMapAuxView_, shadowMapView_))
+    , waterBindGroup_(nullptr)
     , hdrBindGroup_(nullptr)
 
     // Frame textures
@@ -241,6 +247,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , hdrMultisampleTextureView_(nullptr)
     , hdrResolveTexture_(nullptr)
     , hdrResolveTextureView_(nullptr)
+    , hdrWaterTexture_(nullptr)
+    , hdrWaterTextureView_(nullptr)
     , multisampleDepthTexture_(nullptr)
     , multisampleDepthTextureView_(nullptr)
 
@@ -1156,9 +1164,36 @@ void Engine::Impl::renderWater()
 
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    WGPURenderPassEncoder renderPass = createWaterRenderPass(commandEncoder, hdrMultisampleTextureView_, multisampleDepthTextureView_, hdrResolveTextureView_, glm::vec4(1.f));
+    {
+        WGPUImageCopyTexture source;
+        source.nextInChain = nullptr;
+        source.texture = hdrResolveTexture_;
+        source.mipLevel = 0;
+        source.origin = {0, 0, 0};
+        source.aspect = WGPUTextureAspect_All;
+
+        WGPUImageCopyTexture destination;
+        destination.nextInChain = nullptr;
+        destination.texture = hdrWaterTexture_;
+        destination.mipLevel = 0;
+        destination.origin = {0, 0, 0};
+        destination.aspect = WGPUTextureAspect_All;
+
+        WGPUExtent3D copySize;
+        copySize.width = wgpuTextureGetWidth(hdrWaterTexture_);
+        copySize.height = wgpuTextureGetHeight(hdrWaterTexture_);
+        copySize.depthOrArrayLayers = 1;
+
+        wgpuCommandEncoderCopyTextureToTexture(commandEncoder, &source, &destination, &copySize);
+    }
+
+    WGPURenderPassEncoder renderPass = createWaterRenderPass(commandEncoder, hdrWaterTextureView_, glm::vec4(0.f));
     wgpuRenderPassEncoderSetPipeline(renderPass, renderWaterPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 0, cameraBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 1, emptyBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 2, emptyBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 3, lightsBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 4, waterBindGroup_, 0, nullptr);
 
     wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, waterGridVertexBuffer_, 0, wgpuBufferGetSize(waterGridVertexBuffer_));
     wgpuRenderPassEncoderSetIndexBuffer(renderPass, waterGridIndexBuffer_, WGPUIndexFormat_Uint32, 0, wgpuBufferGetSize(waterGridIndexBuffer_));
@@ -1229,7 +1264,7 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize)
             WGPUTextureDescriptor descriptor;
             descriptor.nextInChain = nullptr;
             descriptor.label = nullptr;
-            descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+            descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc;
             descriptor.dimension = WGPUTextureDimension_2D;
             descriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
             descriptor.format = WGPUTextureFormat_RGBA16Float;
@@ -1246,7 +1281,24 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize)
             WGPUTextureDescriptor descriptor;
             descriptor.nextInChain = nullptr;
             descriptor.label = nullptr;
-            descriptor.usage = WGPUTextureUsage_RenderAttachment;
+            descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+            descriptor.dimension = WGPUTextureDimension_2D;
+            descriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
+            descriptor.format = WGPUTextureFormat_RGBA16Float;
+            descriptor.mipLevelCount = 1;
+            descriptor.sampleCount = 1;
+            descriptor.viewFormatCount = 0;
+            descriptor.viewFormats = nullptr;
+
+            hdrWaterTexture_ = wgpuDeviceCreateTexture(device_, &descriptor);
+            hdrWaterTextureView_ = createTextureView(hdrWaterTexture_);
+        }
+
+        {
+            WGPUTextureDescriptor descriptor;
+            descriptor.nextInChain = nullptr;
+            descriptor.label = nullptr;
+            descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
             descriptor.dimension = WGPUTextureDimension_2D;
             descriptor.size = {renderTargetSize.x, renderTargetSize.y, 1};
             descriptor.format = WGPUTextureFormat_Depth24Plus;
@@ -1259,7 +1311,15 @@ void Engine::Impl::updateFrameBuffer(glm::uvec2 const & renderTargetSize)
             multisampleDepthTextureView_ = createTextureView(multisampleDepthTexture_);
         }
 
-        hdrBindGroup_ = createHDRBindGroup(device_, hdrBindGroupLayout_, hdrResolveTextureView_);
+        if (hdrBindGroup_)
+            wgpuBindGroupRelease(hdrBindGroup_);
+
+        hdrBindGroup_ = createHDRBindGroup(device_, hdrBindGroupLayout_, hdrWaterTextureView_);
+
+        if (waterBindGroup_)
+            wgpuBindGroupRelease(waterBindGroup_);
+
+        waterBindGroup_ = createWaterBindGroup(device_, waterBindGroupLayout_, hdrResolveTextureView_, multisampleDepthTextureView_);
 
         cachedRenderTargetSize_ = renderTargetSize;
     }

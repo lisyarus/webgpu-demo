@@ -106,6 +106,7 @@ WGPUBindGroupLayout createGenMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
@@ -134,6 +135,7 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     WGPUBuffer pointLightsBuffer, WGPUTextureView noise3DView, WGPUSampler noise3DSampler);
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
+WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture);
 WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
@@ -142,7 +144,7 @@ WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFor
 WGPUCommandEncoder createCommandEncoder(WGPUDevice device);
 
 WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
-WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor);
+WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, glm::vec4 const & clearColor);
 WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget);
 WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget);
 WGPURenderPassEncoder createLDRRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView target);

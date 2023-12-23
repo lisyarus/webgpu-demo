@@ -66,6 +66,9 @@ struct PointLight {
 @group(3) @binding(6) var noise3DTexture : texture_3d<f32>;
 @group(3) @binding(7) var noise3DSampler : sampler;
 
+@group(4) @binding(0) var hdrColor : texture_2d<f32>;
+@group(4) @binding(1) var hdrDepth : texture_depth_multisampled_2d;
+
 struct VertexInput {
     @builtin(vertex_index) index : u32,
     @location(0) position : vec3f,
@@ -368,22 +371,59 @@ struct WaterVertexInput {
 
 struct WaterVertexOutput {
     @builtin(position) position : vec4f,
-    @location(0) color : vec4f,
+    @location(0) worldPosition : vec3f,
 }
 
 @vertex
 fn waterVertexMain(in : WaterVertexInput) -> WaterVertexOutput {
-    let position = camera.viewProjection * vec4f(in.position.x, 0.0, in.position.y, 1.0);
+    let worldPosition = vec3f(in.position.x, 0.5, in.position.y);
+    let position = camera.viewProjection * vec4f(worldPosition, 1.0);
+    return WaterVertexOutput(position, worldPosition);
+}
 
-    let cid = in.index % 7u;
-    let color = vec4f(f32(cid % 2u), f32((cid / 2u) % 2u), f32((cid / 4u) % 2u), 1.0);
+fn waterSpecular(normal : vec3f, viewDirection : vec3f, lightDirection : vec3f, lightIntensity : vec3f) -> vec3f
+{
+    let reflectivity = mix(0.04, 1.0, pow(1.0 - dot(viewDirection, normal), 5.0));
 
-    return WaterVertexOutput(position, color);
+    let lightness = max(0.0, dot(normal, lightDirection));
+    let halfway = normalize(viewDirection + lightDirection);
+    let specular = pow(max(0.0, dot(halfway, normal)), 64.0);
+
+    return lightIntensity * lightness * specular;
 }
 
 @fragment
 fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
-    return in.color;
+    let viewportSize = textureDimensions(hdrDepth);
+    let rayEndDepth = textureLoad(hdrDepth, vec2i(in.position.xy), 0);
+
+    if (in.position.z > rayEndDepth) {
+        discard;
+    }
+
+    let rayEndPosition = perspectiveDivide(camera.viewProjectionInverse * vec4f((2.0 * in.position.xy / vec2f(viewportSize) - vec2f(1.0)) * vec2f(1.0, -1.0), rayEndDepth, 1.0));
+
+    let normal = vec3f(0.0, 1.0, 0.0);
+    let viewDirection = normalize(camera.position - in.worldPosition);
+
+    let colorIn = textureLoad(hdrColor, vec2i(in.position.xy), 0).rgb;
+
+    var resultColor = mix(vec3f(0.0, 0.0, 0.2), colorIn, exp(- 1.0 * length(in.worldPosition - rayEndPosition)));
+
+    resultColor += waterSpecular(normal, viewDirection, lights.sunDirection, lights.sunIntensity);
+
+    for (var i = 0u; i < lights.pointLightCount; i += 1u) {
+        let light = pointLights[i];
+        let position = randomizeLightPosition(light.position);
+        let direction = position - in.worldPosition;
+        let distance = length(direction);
+        let radius = 0.1;
+        let attenuation = 1.0 / pow(1.0 + distance / radius, 2.0);
+
+        resultColor += waterSpecular(normal, viewDirection, direction / distance, light.intensity * attenuation);
+    }
+
+    return vec4(resultColor, 1.0);
 }
 
 )";
@@ -1313,6 +1353,55 @@ WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Fragment;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = 0;
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Fragment;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Depth;
+    entries[1].texture.multisampled = true;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[1].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device)
 {
     WGPUBindGroupLayoutEntry entries[1];
@@ -1692,25 +1781,6 @@ WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayo
     vertexBufferLayout.attributeCount = 1;
     vertexBufferLayout.attributes = attributes;
 
-    WGPUDepthStencilState depthStencilState;
-    depthStencilState.nextInChain = nullptr;
-    depthStencilState.format = WGPUTextureFormat_Depth24Plus;
-    depthStencilState.depthWriteEnabled = true;
-    depthStencilState.depthCompare = WGPUCompareFunction_Less;
-    depthStencilState.stencilFront.compare = WGPUCompareFunction_Always;
-    depthStencilState.stencilFront.failOp = WGPUStencilOperation_Keep;
-    depthStencilState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
-    depthStencilState.stencilFront.passOp = WGPUStencilOperation_Keep;
-    depthStencilState.stencilBack.compare = WGPUCompareFunction_Always;
-    depthStencilState.stencilBack.failOp = WGPUStencilOperation_Keep;
-    depthStencilState.stencilBack.depthFailOp = WGPUStencilOperation_Keep;
-    depthStencilState.stencilBack.passOp = WGPUStencilOperation_Keep;
-    depthStencilState.stencilReadMask = 0;
-    depthStencilState.stencilWriteMask = 0;
-    depthStencilState.depthBias = 0;
-    depthStencilState.depthBiasSlopeScale = 0.f;
-    depthStencilState.depthBiasClamp = 0.f;
-
     WGPURenderPipelineDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = "water";
@@ -1727,11 +1797,11 @@ WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayo
     descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
     descriptor.primitive.frontFace = WGPUFrontFace_CCW;
     descriptor.primitive.cullMode = WGPUCullMode_None;
-    descriptor.depthStencil = &depthStencilState;
+    descriptor.depthStencil = nullptr;
     descriptor.multisample.nextInChain = nullptr;
-    descriptor.multisample.count = 4;
+    descriptor.multisample.count = 1;
     descriptor.multisample.mask = -1;
-    descriptor.multisample.alphaToCoverageEnabled = true;
+    descriptor.multisample.alphaToCoverageEnabled = false;
     descriptor.fragment = &fragmentState;
 
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
@@ -1999,6 +2069,36 @@ WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout b
     return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
+WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture)
+{
+    WGPUBindGroupEntry entries[2];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].buffer = 0;
+    entries[0].offset = 0;
+    entries[0].size = 0;
+    entries[0].sampler = nullptr;
+    entries[0].textureView = hdrColorTexture;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].buffer = 0;
+    entries[1].offset = 0;
+    entries[1].size = 0;
+    entries[1].sampler = nullptr;
+    entries[1].textureView = hdrDepthTexture;
+
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 2;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
+}
+
 WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input)
 {
     WGPUBindGroupEntry entries[1];
@@ -2084,33 +2184,22 @@ WGPURenderPassEncoder createMainRenderPass(WGPUCommandEncoder commandEncoder, WG
     return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
 }
 
-WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget, WGPUTextureView resolveTarget, glm::vec4 const & clearColor)
+WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, glm::vec4 const & clearColor)
 {
     WGPURenderPassColorAttachment colorAttachment;
     colorAttachment.nextInChain = nullptr;
     colorAttachment.view = colorTarget;
-    colorAttachment.resolveTarget = resolveTarget;
+    colorAttachment.resolveTarget = nullptr;
     colorAttachment.loadOp = WGPULoadOp_Load;
     colorAttachment.storeOp = WGPUStoreOp_Store;
     colorAttachment.clearValue = {clearColor.r, clearColor.g, clearColor.b, clearColor.a};
-
-    WGPURenderPassDepthStencilAttachment depthStencilAttachment;
-    depthStencilAttachment.view = depthTarget;
-    depthStencilAttachment.depthLoadOp = WGPULoadOp_Load;
-    depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
-    depthStencilAttachment.depthClearValue = 1.f;
-    depthStencilAttachment.depthReadOnly = false;
-    depthStencilAttachment.stencilLoadOp = WGPULoadOp_Undefined;
-    depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Undefined;
-    depthStencilAttachment.stencilClearValue = 0;
-    depthStencilAttachment.stencilReadOnly = true;
 
     WGPURenderPassDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.colorAttachmentCount = 1;
     descriptor.colorAttachments = &colorAttachment;
-    descriptor.depthStencilAttachment = &depthStencilAttachment;
+    descriptor.depthStencilAttachment = nullptr;
     descriptor.occlusionQuerySet = nullptr;
     descriptor.timestampWrites = nullptr;
 
