@@ -372,24 +372,44 @@ struct WaterVertexInput {
 struct WaterVertexOutput {
     @builtin(position) position : vec4f,
     @location(0) worldPosition : vec3f,
+    @location(1) normal : vec3f,
 }
 
 @vertex
 fn waterVertexMain(in : WaterVertexInput) -> WaterVertexOutput {
-    let worldPosition = vec3f(in.position.x, 0.5, in.position.y);
+    let S = 0.01;
+    let L = 10.0;
+    let X = L * in.position.x;
+    let Z = L * in.position.y;
+    let worldPosition = vec3f(in.position.x, 0.5 + S * sin(X) * sin(Z), in.position.y);
+    let normal = normalize(vec3f(- S * L * cos(X) * sin(Z), 1.0, - S * L * sin(X) * cos(Z)));
     let position = camera.viewProjection * vec4f(worldPosition, 1.0);
-    return WaterVertexOutput(position, worldPosition);
+    return WaterVertexOutput(position, worldPosition, normal);
 }
 
 fn waterSpecular(normal : vec3f, viewDirection : vec3f, lightDirection : vec3f, lightIntensity : vec3f) -> vec3f
 {
-    let reflectivity = mix(0.04, 1.0, pow(1.0 - dot(viewDirection, normal), 5.0));
+    let reflectivity = mix(0.02, 1.0, pow(1.0 - dot(viewDirection, normal), 5.0));
 
     let lightness = max(0.0, dot(normal, lightDirection));
     let halfway = normalize(viewDirection + lightDirection);
-    let specular = pow(max(0.0, dot(halfway, normal)), 64.0);
+    let specular = pow(max(0.0, dot(halfway, normal)), 32.0);
 
-    return lightIntensity * lightness * specular;
+    return lightIntensity * lightness * specular * reflectivity * 4.0;
+}
+
+fn refract(normal : vec3f, to_camera : vec3f, n : f32) -> vec3f
+{
+    let cosI = abs(dot(normal, to_camera));
+    let sinT2 = n * n * max(0.0, 1.0 - cosI * cosI);
+    let cosT = sqrt(1.0 - sinT2);
+    return -n * to_camera + (n * cosI - cosT) * normal;
+}
+
+fn remapReflection(in : vec2f, threshold : f32) -> vec2f
+{
+    let s = threshold;
+    return sign(in) * select(mix(2.0 / (1.0 + exp(- 2.0 * (abs(in) - vec2f(s)) / (1.0 - s))) - 1.0, vec2f(1.0), s), abs(in), abs(in) < vec2f(s));
 }
 
 @fragment
@@ -402,15 +422,33 @@ fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
     }
 
     let rayEndPosition = perspectiveDivide(camera.viewProjectionInverse * vec4f((2.0 * in.position.xy / vec2f(viewportSize) - vec2f(1.0)) * vec2f(1.0, -1.0), rayEndDepth, 1.0));
+    let distance = length(in.worldPosition - rayEndPosition);
 
-    let normal = vec3f(0.0, 1.0, 0.0);
+    let normal = normalize(in.normal);
     let viewDirection = normalize(camera.position - in.worldPosition);
 
-    let colorIn = textureLoad(hdrColor, vec2i(in.position.xy), 0).rgb;
+    let refractedDirection = refract(normal, viewDirection, 0.99);
+    let refractedPosition = in.worldPosition + distance * refractedDirection;
+    let refractedNdc = perspectiveDivide(camera.viewProjection * vec4(refractedPosition, 1.0));
+    let refractedFragCoord = vec2i((remapReflection(refractedNdc.xy * vec2f(1.0, -1.0), 0.9) * 0.5 + vec2f(0.5)) * vec2f(viewportSize));
+    let refractedEndDepth = textureLoad(hdrDepth, refractedFragCoord, 0);
+    let refractedEndPosition = perspectiveDivide(camera.viewProjectionInverse * vec4f((2.0 * in.position.xy / vec2f(viewportSize) - vec2f(1.0)) * vec2f(1.0, -1.0), refractedEndDepth, 1.0));
+    let refractedDistance = length(refractedPosition - refractedEndPosition);
 
-    var resultColor = mix(vec3f(0.0, 0.0, 0.2), colorIn, exp(- 1.0 * length(in.worldPosition - rayEndPosition)));
+    let colorIn = textureLoad(hdrColor, refractedFragCoord, 0).rgb;
 
-    resultColor += waterSpecular(normal, viewDirection, lights.sunDirection, lights.sunIntensity);
+    let fadeColor = mix(lights.ambientLight * 0.1, colorIn * vec3f(0.3, 0.3, 0.4), exp(- 0.3 * refractedDistance));
+
+    var resultColor = fadeColor;
+
+    let shadowPositionClip = lights.shadowProjection * vec4(in.worldPosition, 1.0);
+    let shadowPositionNdc = perspectiveDivide(shadowPositionClip);
+    let shadowThreshold = 0.125;
+
+    let shadowSample = textureSample(shadowMapTexture, shadowSampler, shadowPositionNdc.xy * vec2f(0.5, -0.5) + vec2f(0.5)).r;
+    let shadowFactor = clamp((exp(- ESM_FACTOR * shadowPositionNdc.z) * shadowSample - shadowThreshold) / (1.0 - shadowThreshold), 0.0, 1.0);
+
+    resultColor += waterSpecular(normal, viewDirection, lights.sunDirection, lights.sunIntensity * shadowFactor);
 
     for (var i = 0u; i < lights.pointLightCount; i += 1u) {
         let light = pointLights[i];
@@ -423,7 +461,7 @@ fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
         resultColor += waterSpecular(normal, viewDirection, direction / distance, light.intensity * attenuation);
     }
 
-    return vec4(resultColor, 1.0);
+    return vec4f(resultColor, 1.0);
 }
 
 )";
@@ -592,6 +630,7 @@ const CLOTH_EDGES_PER_VERTEX = 8u;
 const SPRING_FORCE = 20000.0;
 const MASS = 0.1;
 const DAMPING = 0.04;
+const WATER_DAMPING = 4.0;
 const SMOOTHING = 10.0;
 const FRICTION = 1.0;
 const SHOCK = 20.0;
@@ -671,7 +710,9 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
         avgVelocity /= f32(edgeCount);
 
-        let newVelocity = (currentVelocity + force * settings.dt / MASS) * exp(- DAMPING * settings.dt);
+        let damping = select(DAMPING, WATER_DAMPING, currentPosition.y < 0.5);
+
+        let newVelocity = (currentVelocity + force * settings.dt / MASS) * exp(- damping * settings.dt);
         let smoothedVelocity = mix(avgVelocity, newVelocity, exp(- SMOOTHING * settings.dt));
 
         let collision = collideCamera(currentPosition + smoothedVelocity * settings.dt, smoothedVelocity, 0.5);
