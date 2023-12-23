@@ -209,6 +209,8 @@ fn fractalNoise(p : vec3f) -> f32
     return textureSample(noise3DTexture, noise3DSampler, p).r;
 }
 
+const PHI = 1.618033988749;
+
 fn volumetricLight(
     lightPosition : vec3f,
     lightIntensity : vec3f,
@@ -238,13 +240,15 @@ fn volumetricLight(
     var result = 0.0;
     for (var i = 0; i < N; i += 1) {
         let p = rayStart + (tmin + (f32(i) + 0.5) * dt) * d;
-        let v = (
-                  0.5 * fractalNoise(p * vec3f(1.0, 0.5, 1.0) * 5.0 + vec3f(0.0, - camera.time * 2.0, 0.0))
-                + 0.5 * fractalNoise(p * vec3f(1.0, 0.5, 1.0) * 7.0 + vec3f(0.0, - camera.time * 1.4, 0.0))
-            )
-            * pow(1.0 - length(p.xz - lightPosition.xz) / radius, 0.5);
+        var v =
+              0.5 * fractalNoise(p * vec3f(1.0, 0.5, 1.0) * 5.0       + vec3f(0.0, - camera.time * 2.0, 0.0))
+            + 0.5 * fractalNoise(p * vec3f(1.0, 0.5, 1.0) * 5.0 * PHI + vec3f(0.0, - camera.time * 2.0 / PHI, 0.0));
 
-        result += max(0.0, 4.0 * (v - mix(0.3, 0.6, pow(0.5 + 0.5 * (p.y - lightPosition.y) / radius, 1.5)))) * dt;
+        v *= pow(1.0 - length(p.xz - lightPosition.xz) / radius, 0.5);
+        v -= mix(0.3, 0.7, pow(0.5 + 0.5 * (p.y - lightPosition.y) / radius, 2.5));
+        v = max(0.0, 4.0 * v);
+
+        result += v * dt;
     }
 
     return lightIntensity * result;
