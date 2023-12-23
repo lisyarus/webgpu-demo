@@ -48,6 +48,10 @@ struct PointLight {
     intensity : vec3f,
 }
 
+struct Water {
+    cellSize : vec2f,
+}
+
 @group(0) @binding(0) var<uniform> camera: Camera;
 
 @group(1) @binding(0) var<uniform> object: Object;
@@ -68,6 +72,8 @@ struct PointLight {
 
 @group(4) @binding(0) var hdrColor : texture_2d<f32>;
 @group(4) @binding(1) var hdrDepth : texture_depth_multisampled_2d;
+@group(4) @binding(2) var waterData : texture_2d<f32>;
+@group(4) @binding(3) var<uniform> water : Water;
 
 struct VertexInput {
     @builtin(vertex_index) index : u32,
@@ -375,14 +381,58 @@ struct WaterVertexOutput {
     @location(1) normal : vec3f,
 }
 
+fn waterTriangleNormal(h : f32, p1 : vec3f, p2 : vec3f) -> vec3f
+{
+    let scale = vec3f(water.cellSize, 1.0);
+
+    let p = vec3f(0.0, 0.0, h);
+
+    let n = normalize(cross(p1 * scale - p, p2 * scale - p));
+
+    return n.xzy;
+}
+
 @vertex
 fn waterVertexMain(in : WaterVertexInput) -> WaterVertexOutput {
-    let S = 0.01;
-    let L = 10.0;
-    let X = L * in.position.x;
-    let Z = L * in.position.y;
-    let worldPosition = vec3f(in.position.x, 0.5 + S * sin(X) * sin(Z), in.position.y);
-    let normal = normalize(vec3f(- S * L * cos(X) * sin(Z), 1.0, - S * L * sin(X) * cos(Z)));
+    let count = textureDimensions(waterData, 0);
+    let idx = vec2u(in.index % count.x, in.index / count.x);
+    let height = textureLoad(waterData, idx, 0).r;
+
+    let hasNX = idx.x > 0u;
+    let hasPX = idx.x + 1u < count.x;
+    let hasNY = idx.y > 0u;
+    let hasPY = idx.y + 1u < count.y;
+
+    let idxNX = max(idx.x, 1u) - 1u;
+    let idxPX = min(idx.x, count.x - 2u) + 1u;
+    let idxNY = max(idx.y, 1u) - 1u;
+    let idxPY = min(idx.y, count.y - 2u) + 1u;
+
+    let heightNX = textureLoad(waterData, vec2u(idxNX, idx.y), 0).r;
+    let heightPX = textureLoad(waterData, vec2u(idxPX, idx.y), 0).r;
+    let heightNY = textureLoad(waterData, vec2u(idx.x, idxNY), 0).r;
+    let heightPY = textureLoad(waterData, vec2u(idx.x, idxPY), 0).r;
+
+    var sumNormals = vec3f(0.0);
+
+    if (hasNX && hasNY) {
+        sumNormals += waterTriangleNormal(height, vec3f(-1.0, 0.0, heightNX), vec3f(0.0, -1.0, heightNY));
+    }
+
+    if (hasPX && hasNY) {
+        sumNormals += waterTriangleNormal(height, vec3f(0.0, -1.0, heightNY), vec3f(1.0, 0.0, heightPX));
+    }
+
+    if (hasNX && hasPY) {
+        sumNormals += waterTriangleNormal(height, vec3f(0.0, 1.0, heightPY), vec3f(-1.0, 0.0, heightNX));
+    }
+
+    if (hasPX && hasPY) {
+        sumNormals += waterTriangleNormal(height, vec3f(1.0, 0.0, heightPX), vec3f(0.0, 1.0, heightPY));
+    }
+
+    let worldPosition = vec3f(in.position.x, 0.5 + height, in.position.y);
+    let normal = normalize(sumNormals);
     let position = camera.viewProjection * vec4f(worldPosition, 1.0);
     return WaterVertexOutput(position, worldPosition, normal);
 }
@@ -1396,7 +1446,7 @@ WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device)
 
 WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device)
 {
-    WGPUBindGroupLayoutEntry entries[2];
+    WGPUBindGroupLayoutEntry entries[4];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -1434,10 +1484,46 @@ WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device)
     entries[1].storageTexture.format = WGPUTextureFormat_Undefined;
     entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
 
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Vertex;
+    entries[2].buffer.nextInChain = nullptr;
+    entries[2].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[2].buffer.hasDynamicOffset = false;
+    entries[2].buffer.minBindingSize = 0;
+    entries[2].sampler.nextInChain = nullptr;
+    entries[2].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[2].texture.nextInChain = nullptr;
+    entries[2].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[2].texture.multisampled = false;
+    entries[2].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[2].storageTexture.nextInChain = nullptr;
+    entries[2].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[2].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[3].nextInChain = nullptr;
+    entries[3].binding = 3;
+    entries[3].visibility = WGPUShaderStage_Vertex;
+    entries[3].buffer.nextInChain = nullptr;
+    entries[3].buffer.type = WGPUBufferBindingType_Uniform;
+    entries[3].buffer.hasDynamicOffset = false;
+    entries[3].buffer.minBindingSize = sizeof(WaterUniform);
+    entries[3].sampler.nextInChain = nullptr;
+    entries[3].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[3].texture.nextInChain = nullptr;
+    entries[3].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[3].texture.multisampled = false;
+    entries[3].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[3].storageTexture.nextInChain = nullptr;
+    entries[3].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[3].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[3].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
     WGPUBindGroupLayoutDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
-    descriptor.entryCount = 2;
+    descriptor.entryCount = 4;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
@@ -2110,9 +2196,10 @@ WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout b
     return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
-WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture)
+WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture,
+    WGPUTextureView waterDataTexture, WGPUBuffer uniformBuffer)
 {
-    WGPUBindGroupEntry entries[2];
+    WGPUBindGroupEntry entries[4];
 
     entries[0].nextInChain = nullptr;
     entries[0].binding = 0;
@@ -2130,11 +2217,27 @@ WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGr
     entries[1].sampler = nullptr;
     entries[1].textureView = hdrDepthTexture;
 
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].buffer = 0;
+    entries[2].offset = 0;
+    entries[2].size = 0;
+    entries[2].sampler = nullptr;
+    entries[2].textureView = waterDataTexture;
+
+    entries[3].nextInChain = nullptr;
+    entries[3].binding = 3;
+    entries[3].buffer = uniformBuffer;
+    entries[3].offset = 0;
+    entries[3].size = wgpuBufferGetSize(uniformBuffer);
+    entries[3].sampler = nullptr;
+    entries[3].textureView = nullptr;
+
     WGPUBindGroupDescriptor descriptor;
     descriptor.nextInChain = nullptr;
     descriptor.label = nullptr;
     descriptor.layout = bindGroupLayout;
-    descriptor.entryCount = 2;
+    descriptor.entryCount = 4;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroup(device, &descriptor);

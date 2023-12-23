@@ -82,6 +82,11 @@ struct ClothSettingsUniform
     float gravity;
 };
 
+struct WaterUniform
+{
+    glm::vec2 cellSize;
+};
+
 static constexpr std::size_t CLOTH_EDGES_PER_VERTEX = 8;
 
 glm::mat4 glToVkProjection(glm::mat4 matrix);
@@ -135,7 +140,8 @@ WGPUBindGroup createLightsBindGroup(WGPUDevice device, WGPUBindGroupLayout bindG
     WGPUBuffer pointLightsBuffer, WGPUTextureView noise3DView, WGPUSampler noise3DSampler);
 WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
-WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture);
+WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture,
+    WGPUTextureView waterDataTexture, WGPUBuffer uniformBuffer);
 WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
