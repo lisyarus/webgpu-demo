@@ -1280,7 +1280,7 @@ void Engine::Impl::renderWater(Settings const & settings)
     {
         WaterUniform waterUniform;
         waterUniform.cellSize = waterCellSize_;
-        waterUniform.dt = settings.dt;
+        waterUniform.dt = std::min(0.016f, settings.dt);
         wgpuQueueWriteBuffer(queue_, waterUniformBuffer_, 0, &waterUniform, sizeof(waterUniform));
     }
 
