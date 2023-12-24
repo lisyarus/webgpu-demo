@@ -50,6 +50,7 @@ struct PointLight {
 
 struct Water {
     cellSize : vec2f,
+    dt : f32,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -443,9 +444,9 @@ fn waterSpecular(normal : vec3f, viewDirection : vec3f, lightDirection : vec3f, 
 
     let lightness = max(0.0, dot(normal, lightDirection));
     let halfway = normalize(viewDirection + lightDirection);
-    let specular = pow(max(0.0, dot(halfway, normal)), 32.0);
+    let specular = pow(max(0.0, dot(halfway, normal)), 256.0);
 
-    return lightIntensity * lightness * specular * reflectivity * 4.0;
+    return lightIntensity * lightness * specular * reflectivity * 16.0;
 }
 
 fn refract(normal : vec3f, to_camera : vec3f, n : f32) -> vec3f
@@ -486,8 +487,9 @@ fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
     let refractedDistance = length(refractedPosition - refractedEndPosition);
 
     let colorIn = textureLoad(hdrColor, refractedFragCoord, 0).rgb;
+    let waterColor = vec3f(0.2, 0.2, 0.2);
 
-    let fadeColor = mix(lights.ambientLight * 0.1, colorIn * vec3f(0.3, 0.3, 0.4), exp(- 0.3 * refractedDistance));
+    let fadeColor = mix(lights.ambientLight * 0.1, colorIn * waterColor, exp(- 0.3 * refractedDistance));
 
     var resultColor = fadeColor;
 
@@ -818,6 +820,59 @@ fn simulateClothCopy(@builtin(global_invocation_id) id : vec3u) {
 
     clothVertices[id.x].oldVelocity = clothVertices[id.x].velocity;
     setPosition(id.x, clothVertices[id.x].newPosition);
+}
+
+)";
+
+const char simulateWaterShader[] =
+R"(
+
+struct Water
+{
+    cellSize : vec2f,
+    dt : f32,
+}
+
+@group(0) @binding(0) var<uniform> water : Water;
+@group(0) @binding(1) var oldWaterData : texture_2d<f32>;
+@group(0) @binding(2) var newWaterData : texture_storage_2d<rg32float, write>;
+
+const DX = 1.0;
+const C = 10.0;
+const DAMPING = 0.0;
+
+@compute @workgroup_size(8, 8)
+fn simulateWater(@builtin(global_invocation_id) id : vec3u) {
+    let oldData = textureLoad(oldWaterData, id.xy, 0).rg;
+    let count = textureDimensions(oldWaterData, 0);
+
+    let hasNX = id.x > 0u;
+    let hasPX = id.x + 1u < count.x;
+    let hasNY = id.y > 0u;
+    let hasPY = id.y + 1u < count.y;
+
+    let idNX = max(id.x, 1u) - 1u;
+    let idPX = min(id.x, count.x - 2u) + 1u;
+    let idNY = max(id.y, 1u) - 1u;
+    let idPY = min(id.y, count.y - 2u) + 1u;
+
+    let heightNX = textureLoad(oldWaterData, vec2u(idNX, id.y), 0).r;
+    let heightPX = textureLoad(oldWaterData, vec2u(idPX, id.y), 0).r;
+    let heightNY = textureLoad(oldWaterData, vec2u(id.x, idNY), 0).r;
+    let heightPY = textureLoad(oldWaterData, vec2u(id.x, idPY), 0).r;
+
+    var L = 0.0;
+    if (hasNX) { L += heightNX - oldData.r; }
+    if (hasPX) { L += heightPX - oldData.r; }
+    if (hasNY) { L += heightNY - oldData.r; }
+    if (hasPY) { L += heightPY - oldData.r; }
+
+    var newData = vec2f(0.0);
+    newData.g = oldData.g + C * C * L / DX / DX * water.dt;
+    newData.g *= exp(- DAMPING * water.dt);
+    newData.r = oldData.r + newData.g * water.dt;
+
+    textureStore(newWaterData, id.xy, vec4f(newData, 0.0, 0.0));
 }
 
 )";
@@ -1529,6 +1584,73 @@ WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createSimulateWaterBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[3];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Compute;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Uniform;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = sizeof(WaterUniform);
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Compute;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[1].texture.multisampled = false;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[1].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Compute;
+    entries[2].buffer.nextInChain = nullptr;
+    entries[2].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[2].buffer.hasDynamicOffset = false;
+    entries[2].buffer.minBindingSize = 0;
+    entries[2].sampler.nextInChain = nullptr;
+    entries[2].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[2].texture.nextInChain = nullptr;
+    entries[2].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[2].texture.multisampled = false;
+    entries[2].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[2].storageTexture.nextInChain = nullptr;
+    entries[2].storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+    entries[2].storageTexture.format = WGPUTextureFormat_RG32Float;
+    entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 3;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device)
 {
     WGPUBindGroupLayoutEntry entries[1];
@@ -1934,6 +2056,21 @@ WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayo
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
 }
 
+WGPUComputePipeline createSimulateWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule)
+{
+    WGPUComputePipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "simulateWater";
+    descriptor.layout = pipelineLayout;
+    descriptor.compute.nextInChain = nullptr;
+    descriptor.compute.module = shaderModule;
+    descriptor.compute.entryPoint = "simulateWater";
+    descriptor.compute.constantCount = 0;
+    descriptor.compute.constants = nullptr;
+
+    return wgpuDeviceCreateComputePipeline(device, &descriptor);
+}
+
 WGPURenderPipeline createLDRPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat)
 {
     WGPUColorTargetState colorTargetState;
@@ -2238,6 +2375,44 @@ WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGr
     descriptor.label = nullptr;
     descriptor.layout = bindGroupLayout;
     descriptor.entryCount = 4;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
+}
+
+WGPUBindGroup createSimulateWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUTextureView input, WGPUTextureView output)
+{
+    WGPUBindGroupEntry entries[3];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].buffer = uniformBuffer;
+    entries[0].offset = 0;
+    entries[0].size = wgpuBufferGetSize(uniformBuffer);
+    entries[0].sampler = nullptr;
+    entries[0].textureView = nullptr;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].buffer = nullptr;
+    entries[1].offset = 0;
+    entries[1].size = 0;
+    entries[1].sampler = nullptr;
+    entries[1].textureView = input;
+
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].buffer = nullptr;
+    entries[2].offset = 0;
+    entries[2].size = 0;
+    entries[2].sampler = nullptr;
+    entries[2].textureView = output;
+
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 3;
     descriptor.entries = entries;
 
     return wgpuDeviceCreateBindGroup(device, &descriptor);

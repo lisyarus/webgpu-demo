@@ -85,6 +85,8 @@ struct ClothSettingsUniform
 struct WaterUniform
 {
     glm::vec2 cellSize;
+    float dt;
+    float padding[1];
 };
 
 static constexpr std::size_t CLOTH_EDGES_PER_VERTEX = 8;
@@ -96,6 +98,7 @@ extern const char genMipmapShader[];
 extern const char genEnvMipmapShader[];
 extern const char blurShadowShader[];
 extern const char simulateClothShader[];
+extern const char simulateWaterShader[];
 extern const char ldrShader[];
 
 std::uint32_t minStorageBufferOffsetAlignment(WGPUDevice device);
@@ -112,6 +115,7 @@ WGPUBindGroupLayout createGenEnvMipmapBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createBlurShadowBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createSimulateWaterBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
@@ -127,6 +131,7 @@ WGPUComputePipeline createBlurShadowYPipeline(WGPUDevice device, WGPUPipelineLay
 WGPUComputePipeline createSimulateClothPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
+WGPUComputePipeline createSimulateWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPURenderPipeline createLDRPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
@@ -142,6 +147,7 @@ WGPUBindGroup createGenMipmapBindGroup(WGPUDevice device, WGPUBindGroupLayout bi
 WGPUBindGroup createBlurShadowBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView hdrColorTexture, WGPUTextureView hdrDepthTexture,
     WGPUTextureView waterDataTexture, WGPUBuffer uniformBuffer);
+WGPUBindGroup createSimulateWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
