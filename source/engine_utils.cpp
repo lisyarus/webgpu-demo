@@ -446,7 +446,7 @@ fn waterSpecular(normal : vec3f, viewDirection : vec3f, lightDirection : vec3f, 
     let halfway = normalize(viewDirection + lightDirection);
     let specular = pow(max(0.0, dot(halfway, normal)), 256.0);
 
-    return lightIntensity * lightness * specular * reflectivity * 16.0;
+    return lightIntensity * lightness * specular * reflectivity * 64.0;
 }
 
 fn refract(normal : vec3f, to_camera : vec3f, n : f32) -> vec3f
@@ -478,7 +478,7 @@ fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
     let normal = normalize(in.normal);
     let viewDirection = normalize(camera.position - in.worldPosition);
 
-    let refractedDirection = refract(normal, viewDirection, 0.99);
+    let refractedDirection = refract(normal, viewDirection, 0.95);
     let refractedPosition = in.worldPosition + distance * refractedDirection;
     let refractedNdc = perspectiveDivide(camera.viewProjection * vec4(refractedPosition, 1.0));
     let refractedFragCoord = vec2i((remapReflection(refractedNdc.xy * vec2f(1.0, -1.0), 0.9) * 0.5 + vec2f(0.5)) * vec2f(viewportSize));
@@ -487,9 +487,9 @@ fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
     let refractedDistance = length(refractedPosition - refractedEndPosition);
 
     let colorIn = textureLoad(hdrColor, refractedFragCoord, 0).rgb;
-    let waterColor = vec3f(0.2, 0.2, 0.2);
+    let waterColor = vec3f(2.0);
 
-    let fadeColor = mix(lights.ambientLight * 0.1, colorIn * waterColor, exp(- 0.3 * refractedDistance));
+    let fadeColor = mix(lights.ambientLight * 0.5, colorIn * waterColor, exp(- 0.3 * refractedDistance));
 
     var resultColor = fadeColor;
 
