@@ -489,7 +489,7 @@ fn waterFragmentMain(in : WaterVertexOutput) -> @location(0) vec4f {
     let colorIn = textureLoad(hdrColor, refractedFragCoord, 0).rgb;
     let waterColor = vec3f(2.0);
 
-    let fadeColor = mix(lights.ambientLight * 0.5, colorIn * waterColor, exp(- 0.3 * refractedDistance));
+    let fadeColor = mix(lights.ambientLight * vec3f(0.5, 0.5, 0.8), colorIn * waterColor, exp(- 0.3 * refractedDistance));
 
     var resultColor = fadeColor;
 
