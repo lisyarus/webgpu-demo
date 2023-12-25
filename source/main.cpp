@@ -60,6 +60,7 @@ int main(int argc, char ** argv)
     bool vsync = true;
     bool gravity = true;
     bool water = true;
+    bool help = true;
 
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
@@ -121,6 +122,8 @@ int main(int argc, char ** argv)
                 gravity ^= true;
             if (event->key.keysym.scancode == SDL_SCANCODE_T)
                 water ^= true;
+            if (event->key.keysym.scancode == SDL_SCANCODE_H)
+                help ^= true;
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);
@@ -193,7 +196,11 @@ int main(int argc, char ** argv)
         settings.gravity = gravity;
         settings.water = water;
 
-        std::string text =
+        std::string text;
+
+        if (help)
+        {
+            text =
 R"(Controls:
   [WASD] - move
   [Shift] - move fast
@@ -203,11 +210,12 @@ R"(Controls:
   [V] - toggle vsync
   [T] - toggle water
   [G] - toggle gravity
+  [H] - show help
   [F] - FUS DO RAH
 
 )";
-
-        text += std::to_string(static_cast<int>(std::round(1.f / averageFrameTime))) + " FPS\n";
+            text += std::to_string(static_cast<int>(std::round(1.f / averageFrameTime))) + " FPS\n";
+        }
 
         engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings, text);
 
