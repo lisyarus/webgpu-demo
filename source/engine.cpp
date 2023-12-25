@@ -18,12 +18,12 @@
 
 struct Engine::Impl
 {
-    Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3dPath);
+    Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3dPath, std::filesystem::path const & fontPath);
     ~Impl();
 
     void setEnvMap(std::filesystem::path const & hdrImagePath);
     void setWater(Box const & box, std::filesystem::path const & waterState);
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings, std::string const & text);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
 private:
@@ -50,6 +50,7 @@ private:
     WGPUBindGroupLayout waterBindGroupLayout_;
     WGPUBindGroupLayout simulateWaterBindGroupLayout_;
     WGPUBindGroupLayout hdrBindGroupLayout_;
+    WGPUBindGroupLayout textBindGroupLayout_;
 
     WGPUShaderModule shaderModule_;
     WGPUShaderModule genMipmapShaderModule_;
@@ -58,6 +59,7 @@ private:
     WGPUShaderModule simulateClothShaderModule_;
     WGPUShaderModule simulateWaterShaderModule_;
     WGPUShaderModule ldrShaderModule_;
+    WGPUShaderModule textShaderModule_;
 
     WGPUTexture shadowMap_;
     WGPUTexture shadowMapAux_;
@@ -70,6 +72,7 @@ private:
     WGPUSampler shadowSampler_;
     WGPUSampler envSampler_;
     WGPUSampler noise3DSampler_;
+    WGPUSampler textSampler_;
 
     WGPUPipelineLayout mainPipelineLayout_;
     WGPURenderPipeline mainPipeline_;
@@ -94,6 +97,8 @@ private:
     WGPUComputePipeline simulateWaterPipeline_;
     WGPUPipelineLayout ldrPipelineLayout_;
     WGPURenderPipeline ldrPipeline_;
+    WGPUPipelineLayout textPipelineLayout_;
+    WGPURenderPipeline textPipeline_;
 
     WGPUBuffer cameraUniformBuffer_;
     WGPUBuffer objectUniformBuffer_;
@@ -101,12 +106,16 @@ private:
     WGPUBuffer clothSettingsUniformBuffer_;
     WGPUBuffer pointLightsBuffer_;
     WGPUBuffer waterUniformBuffer_;
+    WGPUBuffer textUniformBuffer_;
+    WGPUBuffer textVertexBuffer_;
 
     WGPUTexture stubEnvTexture_;
     WGPUTexture envTexture_;
     WGPUTextureView envTextureView_;
     WGPUTexture noise3DTexture_;
     WGPUTextureView noise3DTextureView_;
+    WGPUTexture fontTexture_;
+    WGPUTextureView fontTextureView_;
 
     std::uint64_t objectUniformBufferStride_ = 256;
 
@@ -120,6 +129,7 @@ private:
     WGPUBindGroup simulateWaterBindGroup1_;
     WGPUBindGroup simulateWaterBindGroup2_;
     WGPUBindGroup hdrBindGroup_;
+    WGPUBindGroup textBindGroup_;
 
     WGPUTexture hdrMultisampleTexture_;
     WGPUTextureView hdrMultisampleTextureView_;
@@ -151,6 +161,7 @@ private:
     void renderMain(std::vector<RenderObjectPtr> const & objects);
     void renderWater(Settings const & settings);
     void renderLDR(WGPUTextureView targetView, WGPUTextureFormat surfaceFormat);
+    void renderText(WGPUTextureView targetView, WGPUTextureFormat surfaceFormat, glm::ivec2 const & viewportSize, std::string const & text);
 
     void updateFrameBuffer(glm::uvec2 const & renderTargetSize);
     void updateCameraBuffer(Camera const & camera, Settings const & settings, WGPUBuffer buffer, glm::ivec2 const & viewport);
@@ -164,7 +175,7 @@ private:
     void loaderThreadMain();
 };
 
-Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath)
+Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath, std::filesystem::path const & fontPath)
     : device_(device)
     , queue_(queue)
     , minStorageBufferOffsetAlignment_(minStorageBufferOffsetAlignment(device_))
@@ -183,6 +194,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , waterBindGroupLayout_(createWaterBindGroupLayout(device_))
     , simulateWaterBindGroupLayout_(createSimulateWaterBindGroupLayout(device_))
     , hdrBindGroupLayout_(createHDRBindGroupLayout(device_))
+    , textBindGroupLayout_(createTextBindGroupLayout(device_))
 
     // Shader modules
     , shaderModule_(createShaderModule(device_, mainShader))
@@ -192,6 +204,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , simulateClothShaderModule_(createShaderModule(device_, simulateClothShader))
     , simulateWaterShaderModule_(createShaderModule(device_, simulateWaterShader))
     , ldrShaderModule_(createShaderModule(device_, ldrShader))
+    , textShaderModule_(createShaderModule(device_, textShader))
 
     // Shadow map textures & views
     , shadowMap_(createShadowMapTexture(device_, 2048))
@@ -206,6 +219,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , shadowSampler_(createShadowSampler(device_))
     , envSampler_(createEnvSampler(device_))
     , noise3DSampler_(create3DNoiseSampler(device_))
+    , textSampler_(createTextSampler(device_))
 
     // Pipelines
     , mainPipelineLayout_(createPipelineLayout(device_, {cameraBindGroupLayout_, objectBindGroupLayout_, texturesBindGroupLayout_, lightsBindGroupLayout_}))
@@ -231,6 +245,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , simulateWaterPipeline_(createSimulateWaterPipeline(device_, simulateWaterPipelineLayout_, simulateWaterShaderModule_))
     , ldrPipelineLayout_(createPipelineLayout(device_, {hdrBindGroupLayout_}))
     , ldrPipeline_(nullptr)
+    , textPipelineLayout_(createPipelineLayout(device_, {textBindGroupLayout_}))
+    , textPipeline_(nullptr)
 
     // Uniform buffers
     , cameraUniformBuffer_(createUniformBuffer(device_, sizeof(CameraUniform)))
@@ -239,6 +255,8 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , clothSettingsUniformBuffer_(createUniformBuffer(device_, sizeof(ClothSettingsUniform)))
     , pointLightsBuffer_(createStorageBuffer(device_, 16 * sizeof(PointLight)))
     , waterUniformBuffer_(createUniformBuffer(device_, sizeof(WaterUniform)))
+    , textUniformBuffer_(createUniformBuffer(device_, sizeof(TextUniform)))
+    , textVertexBuffer_(nullptr)
 
     // Environment map textures and views
     , stubEnvTexture_(createStubEnvTexture(device_, queue_))
@@ -248,6 +266,10 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     // Noise textures
     , noise3DTexture_(create3DNoiseTexture(device_, queue_, noise3DPath))
     , noise3DTextureView_(create3DNoiseTextureView(noise3DTexture_))
+
+    // Font textures
+    , fontTexture_(createFontTexture(device_, queue_, fontPath))
+    , fontTextureView_(createTextureView(fontTexture_))
 
     // Bind groups
     , emptyBindGroup_(createEmptyBindGroup(device_, emptyBindGroupLayout_))
@@ -260,6 +282,7 @@ Engine::Impl::Impl(WGPUDevice device, WGPUQueue queue, std::filesystem::path con
     , simulateWaterBindGroup1_(nullptr)
     , simulateWaterBindGroup2_(nullptr)
     , hdrBindGroup_(nullptr)
+    , textBindGroup_(createTextBindGroup(device_, textBindGroupLayout_, textUniformBuffer_, fontTextureView_, textSampler_))
 
     // Frame textures
     , hdrMultisampleTexture_(nullptr)
@@ -629,7 +652,7 @@ void Engine::Impl::setWater(Box const & box, std::filesystem::path const & water
     simulateWaterBindGroup2_ = nullptr;
 }
 
-void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)
+void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings, std::string const & text)
 {
     for (auto task : renderQueue_.grab())
         task();
@@ -640,7 +663,9 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     int pointLightCount = updatePointLightsBuffer(objects);
 
-    updateCameraBuffer(camera, settings, cameraUniformBuffer_, {wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
+    glm::ivec2 const viewportSize{wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)};
+
+    updateCameraBuffer(camera, settings, cameraUniformBuffer_, viewportSize);
     simulateCloth(objects, camera, settings, settings.paused ? 0 : 16);
 
     glm::mat4 shadowProjection = computeShadowProjection(settings.sunDirection, sceneBbox);
@@ -650,7 +675,7 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
 
     blurShadow();
 
-    updateCameraBuffer(camera, settings, cameraUniformBuffer_, {wgpuTextureGetWidth(target), wgpuTextureGetHeight(target)});
+    updateCameraBuffer(camera, settings, cameraUniformBuffer_, viewportSize);
     updateLightsUniformBuffer(shadowProjection, settings, pointLightCount);
 
     renderEnv();
@@ -661,6 +686,8 @@ void Engine::Impl::render(WGPUTexture target, std::vector<RenderObjectPtr> const
     WGPUTextureView targetView = createTextureView(target);
 
     renderLDR(targetView, surfaceFormat);
+
+    renderText(targetView, surfaceFormat, viewportSize, text);
 
     wgpuTextureViewRelease(targetView);
 }
@@ -1284,7 +1311,7 @@ void Engine::Impl::renderWater(Settings const & settings)
 
     WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
 
-    if (!settings.paused)
+    if (!settings.paused && settings.water)
     {
         WGPUComputePassEncoder computePass = createComputePass(commandEncoder);
 
@@ -1323,6 +1350,7 @@ void Engine::Impl::renderWater(Settings const & settings)
         wgpuCommandEncoderCopyTextureToTexture(commandEncoder, &source, &destination, &copySize);
     }
 
+    if (settings.water)
     {
         WGPURenderPassEncoder renderPass = createWaterRenderPass(commandEncoder, hdrWaterTextureView_, glm::vec4(0.f));
         wgpuRenderPassEncoderSetPipeline(renderPass, renderWaterPipeline_);
@@ -1358,6 +1386,98 @@ void Engine::Impl::renderLDR(WGPUTextureView targetView, WGPUTextureFormat surfa
     wgpuRenderPassEncoderSetPipeline(renderPass, ldrPipeline_);
     wgpuRenderPassEncoderSetBindGroup(renderPass, 0, hdrBindGroup_, 0, nullptr);
     wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+
+    wgpuRenderPassEncoderEnd(renderPass);
+    wgpuRenderPassEncoderRelease(renderPass);
+
+    auto commandBuffer = commandEncoderFinish(commandEncoder);
+    wgpuQueueSubmit(queue_, 1, &commandBuffer);
+
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(commandEncoder);
+}
+
+void Engine::Impl::renderText(WGPUTextureView targetView, WGPUTextureFormat surfaceFormat, glm::ivec2 const & viewportSize, std::string const & text)
+{
+    if (!textPipeline_)
+        textPipeline_ = createTextPipeline(device_, textPipelineLayout_, textShaderModule_, surfaceFormat);
+
+    glm::ivec2 const fontSize{9, 12};
+    glm::vec2 const fontSizef = glm::vec2(fontSize);
+    glm::vec2 const cellSizef = fontSizef + glm::vec2(2.0, 2.0);
+    glm::ivec2 const textureSize = (fontSize + glm::ivec2(2)) * glm::ivec2(16, 6);
+    glm::vec2 const textureSizef = glm::vec2(textureSize);
+    float const scale = 1.f;
+
+    int vertexCount = 0;
+
+    {
+        std::vector<TextVertex> vertices;
+
+        glm::vec2 penStart = fontSizef * 1.f * scale;
+        glm::vec2 pen = penStart;
+
+        for (unsigned char ch : text)
+        {
+            if (ch == '\n')
+            {
+                pen.x = penStart.x;
+                pen.y += fontSizef.y * scale;
+                continue;
+            }
+
+            if (ch < 32 || ch >= 128) ch = ' ';
+            ch -= 32;
+
+            TextVertex v00, v01, v10, v11;
+
+            v00.position = pen + fontSizef * glm::vec2(0.0, 0.0) * scale;
+            v01.position = pen + fontSizef * glm::vec2(1.0, 0.0) * scale;
+            v10.position = pen + fontSizef * glm::vec2(0.0, 1.0) * scale;
+            v11.position = pen + fontSizef * glm::vec2(1.0, 1.0) * scale;
+
+            glm::vec2 const id{ch % 16, ch / 16};
+
+            v00.texcoord = ((id + glm::vec2(0.0, 0.0)) * cellSizef + glm::vec2( 1.0,  1.0)) / textureSizef;
+            v01.texcoord = ((id + glm::vec2(1.0, 0.0)) * cellSizef + glm::vec2(-1.0,  1.0)) / textureSizef;
+            v10.texcoord = ((id + glm::vec2(0.0, 1.0)) * cellSizef + glm::vec2( 1.0, -1.0)) / textureSizef;
+            v11.texcoord = ((id + glm::vec2(1.0, 1.0)) * cellSizef + glm::vec2(-1.0, -1.0)) / textureSizef;
+
+            vertices.insert(vertices.end(), {v00, v01, v10, v10, v01, v11});
+
+            pen.x += fontSizef.x * scale;
+        }
+
+        if (!textVertexBuffer_ || wgpuBufferGetSize(textVertexBuffer_) < vertices.size() * sizeof(vertices[0]))
+        {
+            WGPUBufferDescriptor descriptor;
+            descriptor.nextInChain = nullptr;
+            descriptor.label = nullptr;
+            descriptor.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+            descriptor.size = vertices.size() * sizeof(vertices[0]);
+            descriptor.mappedAtCreation = false;
+
+            textVertexBuffer_ = wgpuDeviceCreateBuffer(device_, &descriptor);
+        }
+
+        wgpuQueueWriteBuffer(queue_, textVertexBuffer_, 0, vertices.data(), vertices.size() * sizeof(vertices[0]));
+
+        vertexCount = vertices.size();
+    }
+
+    {
+        TextUniform textUniform;
+        textUniform.viewportSize = viewportSize;
+        wgpuQueueWriteBuffer(queue_, textUniformBuffer_, 0, &textUniform, sizeof(textUniform));
+    }
+
+    WGPUCommandEncoder commandEncoder = createCommandEncoder(device_);
+
+    WGPURenderPassEncoder renderPass = createTextRenderPass(commandEncoder, targetView);
+    wgpuRenderPassEncoderSetPipeline(renderPass, textPipeline_);
+    wgpuRenderPassEncoderSetBindGroup(renderPass, 0, textBindGroup_, 0, nullptr);
+    wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, textVertexBuffer_, 0, wgpuBufferGetSize(textVertexBuffer_));
+    wgpuRenderPassEncoderDraw(renderPass, vertexCount, 1, 0, 0);
 
     wgpuRenderPassEncoderEnd(renderPass);
     wgpuRenderPassEncoderRelease(renderPass);
@@ -1701,8 +1821,8 @@ void Engine::Impl::loaderThreadMain()
     }
 }
 
-Engine::Engine(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath)
-    : pimpl_(std::make_unique<Impl>(device, queue, noise3DPath))
+Engine::Engine(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath, std::filesystem::path const & fontPath)
+    : pimpl_(std::make_unique<Impl>(device, queue, noise3DPath, fontPath))
 {}
 
 Engine::~Engine() = default;
@@ -1722,9 +1842,9 @@ void Engine::setWater(Box const & box, std::filesystem::path const & waterState)
     pimpl_->setWater(box, waterState);
 }
 
-void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)
+void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings, std::string const & text)
 {
-    pimpl_->render(target, objects, camera, sceneBbox, settings);
+    pimpl_->render(target, objects, camera, sceneBbox, settings, text);
 }
 
 Box Engine::bbox(std::vector<RenderObjectPtr> const & objects) const

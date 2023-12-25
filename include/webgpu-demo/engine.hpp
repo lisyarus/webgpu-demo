@@ -17,7 +17,7 @@ using RenderObjectPtr = std::shared_ptr<RenderObject>;
 
 struct Engine
 {
-    Engine(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath);
+    Engine(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & noise3DPath, std::filesystem::path const & fontPath);
     ~Engine();
 
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
@@ -42,9 +42,10 @@ struct Engine
         float time;
         float dt;
         bool gravity;
+        bool water;
     };
 
-    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);
+    void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings, std::string const & text);
 
 private:
     struct Impl;

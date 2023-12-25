@@ -1,4 +1,5 @@
 #include <webgpu-demo/engine_utils.hpp>
+#include <webgpu-demo/gltf_loader.hpp>
 
 #include <vector>
 #include <fstream>
@@ -762,7 +763,8 @@ fn simulateCloth(@builtin(global_invocation_id) id : vec3u) {
 
         avgVelocity /= f32(edgeCount);
 
-        let damping = select(DAMPING, WATER_DAMPING, currentPosition.y < 0.5);
+//        let damping = select(DAMPING, WATER_DAMPING, currentPosition.y < 0.5);
+        let damping = DAMPING;
 
         let newVelocity = (currentVelocity + force * settings.dt / MASS) * exp(- damping * settings.dt);
         let smoothedVelocity = mix(avgVelocity, newVelocity, exp(- SMOOTHING * settings.dt));
@@ -925,6 +927,41 @@ fn tonemap(x : vec3f) -> vec3f {
 fn ldrFragmentMain(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
     let color = textureLoad(hdrTexture, vec2u(fragCoord.xy), 0).rgb;
     return vec4f(tonemap(color), 1.0);
+}
+
+)";
+
+const char textShader[] =
+R"(
+
+@group(0) @binding(0) var<uniform> viewportSize : vec2i;
+@group(0) @binding(1) var fontTexture : texture_2d<f32>;
+@group(0) @binding(2) var fontSampler : sampler;
+
+struct VertexIn
+{
+    @location(0) position : vec2f,
+    @location(1) texcoord : vec2f,
+}
+
+struct VertexOut
+{
+    @builtin(position) position : vec4f,
+    @location(0) texcoord : vec2f,
+}
+
+@vertex
+fn textVertexMain(in : VertexIn) -> VertexOut {
+    return VertexOut(
+        vec4f(vec2f(1.0, -1.0) * (2.0 * in.position / vec2f(viewportSize) - vec2f(1.f)), 0.0, 1.0),
+        in.texcoord
+    );
+}
+
+@fragment
+fn textFragmentMain(in : VertexOut) -> @location(0) vec4f {
+    let alpha = textureSample(fontTexture, fontSampler, in.texcoord).r;
+    return vec4f(vec3f(1.0), alpha);
 }
 
 )";
@@ -1682,6 +1719,73 @@ WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device)
     return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
 }
 
+WGPUBindGroupLayout createTextBindGroupLayout(WGPUDevice device)
+{
+    WGPUBindGroupLayoutEntry entries[3];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Vertex;
+    entries[0].buffer.nextInChain = nullptr;
+    entries[0].buffer.type = WGPUBufferBindingType_Uniform;
+    entries[0].buffer.hasDynamicOffset = false;
+    entries[0].buffer.minBindingSize = sizeof(TextUniform);
+    entries[0].sampler.nextInChain = nullptr;
+    entries[0].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[0].texture.nextInChain = nullptr;
+    entries[0].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[0].texture.multisampled = false;
+    entries[0].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[0].storageTexture.nextInChain = nullptr;
+    entries[0].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[0].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[0].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Fragment;
+    entries[1].buffer.nextInChain = nullptr;
+    entries[1].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[1].buffer.hasDynamicOffset = false;
+    entries[1].buffer.minBindingSize = 0;
+    entries[1].sampler.nextInChain = nullptr;
+    entries[1].sampler.type = WGPUSamplerBindingType_Undefined;
+    entries[1].texture.nextInChain = nullptr;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Float;
+    entries[1].texture.multisampled = false;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[1].storageTexture.nextInChain = nullptr;
+    entries[1].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[1].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[1].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Fragment;
+    entries[2].buffer.nextInChain = nullptr;
+    entries[2].buffer.type = WGPUBufferBindingType_Undefined;
+    entries[2].buffer.hasDynamicOffset = false;
+    entries[2].buffer.minBindingSize = 0;
+    entries[2].sampler.nextInChain = nullptr;
+    entries[2].sampler.type = WGPUSamplerBindingType_Filtering;
+    entries[2].texture.nextInChain = nullptr;
+    entries[2].texture.sampleType = WGPUTextureSampleType_Undefined;
+    entries[2].texture.multisampled = false;
+    entries[2].texture.viewDimension = WGPUTextureViewDimension_Undefined;
+    entries[2].storageTexture.nextInChain = nullptr;
+    entries[2].storageTexture.access = WGPUStorageTextureAccess_Undefined;
+    entries[2].storageTexture.format = WGPUTextureFormat_Undefined;
+    entries[2].storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+    WGPUBindGroupLayoutDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.entryCount = 3;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroupLayout(device, &descriptor);
+}
+
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts)
 {
     WGPUPipelineLayoutDescriptor descriptor;
@@ -2114,6 +2218,71 @@ WGPURenderPipeline createLDRPipeline(WGPUDevice device, WGPUPipelineLayout pipel
     return wgpuDeviceCreateRenderPipeline(device, &descriptor);
 }
 
+WGPURenderPipeline createTextPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat)
+{
+    WGPUVertexAttribute attributes[2];
+    attributes[0].format = WGPUVertexFormat_Float32x2;
+    attributes[0].offset = 0;
+    attributes[0].shaderLocation = 0;
+    attributes[1].format = WGPUVertexFormat_Float32x2;
+    attributes[1].offset = 8;
+    attributes[1].shaderLocation = 1;
+
+    WGPUVertexBufferLayout vertexBufferLayout;
+    vertexBufferLayout.arrayStride = sizeof(TextVertex);
+    vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+    vertexBufferLayout.attributeCount = 2;
+    vertexBufferLayout.attributes = attributes;
+
+    WGPUBlendState blendState;
+    blendState.color.srcFactor = WGPUBlendFactor_SrcAlpha;
+    blendState.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    blendState.color.operation = WGPUBlendOperation_Add;
+    blendState.alpha.srcFactor = WGPUBlendFactor_SrcAlpha;
+    blendState.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    blendState.alpha.operation = WGPUBlendOperation_Add;
+
+    WGPUColorTargetState colorTargetState;
+    colorTargetState.nextInChain = nullptr;
+    colorTargetState.format = surfaceFormat;
+    colorTargetState.blend = &blendState;
+    colorTargetState.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState;
+    fragmentState.nextInChain = nullptr;
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = "textFragmentMain";
+    fragmentState.constantCount = 0;
+    fragmentState.constants = nullptr;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTargetState;
+
+    WGPURenderPipelineDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = "text";
+    descriptor.layout = pipelineLayout;
+    descriptor.nextInChain = nullptr;
+    descriptor.vertex.module = shaderModule;
+    descriptor.vertex.entryPoint = "textVertexMain";
+    descriptor.vertex.constantCount = 0;
+    descriptor.vertex.constants = nullptr;
+    descriptor.vertex.bufferCount = 1;
+    descriptor.vertex.buffers = &vertexBufferLayout;
+    descriptor.primitive.nextInChain = nullptr;
+    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    descriptor.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+    descriptor.primitive.frontFace = WGPUFrontFace_CCW;
+    descriptor.primitive.cullMode = WGPUCullMode_None;
+    descriptor.depthStencil = nullptr;
+    descriptor.multisample.nextInChain = nullptr;
+    descriptor.multisample.count = 1;
+    descriptor.multisample.mask = -1;
+    descriptor.multisample.alphaToCoverageEnabled = false;
+    descriptor.fragment = &fragmentState;
+
+    return wgpuDeviceCreateRenderPipeline(device, &descriptor);
+}
+
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size)
 {
     WGPUBufferDescriptor descriptor;
@@ -2440,6 +2609,44 @@ WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGrou
     return wgpuDeviceCreateBindGroup(device, &descriptor);
 }
 
+WGPUBindGroup createTextBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUTextureView fontTexture, WGPUSampler fontSampler)
+{
+    WGPUBindGroupEntry entries[3];
+
+    entries[0].nextInChain = nullptr;
+    entries[0].binding = 0;
+    entries[0].buffer = uniformBuffer;
+    entries[0].offset = 0;
+    entries[0].size = wgpuBufferGetSize(uniformBuffer);
+    entries[0].sampler = nullptr;
+    entries[0].textureView = nullptr;
+
+    entries[1].nextInChain = nullptr;
+    entries[1].binding = 1;
+    entries[1].buffer = nullptr;
+    entries[1].offset = 0;
+    entries[1].size = 0;
+    entries[1].sampler = nullptr;
+    entries[1].textureView = fontTexture;
+
+    entries[2].nextInChain = nullptr;
+    entries[2].binding = 2;
+    entries[2].buffer = nullptr;
+    entries[2].offset = 0;
+    entries[2].size = 0;
+    entries[2].sampler = fontSampler;
+    entries[2].textureView = nullptr;
+
+    WGPUBindGroupDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.layout = bindGroupLayout;
+    descriptor.entryCount = 3;
+    descriptor.entries = entries;
+
+    return wgpuDeviceCreateBindGroup(device, &descriptor);
+}
+
 WGPUTextureView createTextureView(WGPUTexture texture, int level)
 {
     return createTextureView(texture, level, wgpuTextureGetFormat(texture));
@@ -2602,6 +2809,28 @@ WGPURenderPassEncoder createLDRRenderPass(WGPUCommandEncoder commandEncoder, WGP
     return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
 }
 
+WGPURenderPassEncoder createTextRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView target)
+{
+    WGPURenderPassColorAttachment colorAttachment;
+    colorAttachment.nextInChain = nullptr;
+    colorAttachment.view = target;
+    colorAttachment.resolveTarget = nullptr;
+    colorAttachment.loadOp = WGPULoadOp_Load;
+    colorAttachment.storeOp = WGPUStoreOp_Store;
+    colorAttachment.clearValue = {0.0, 0.0, 0.0, 0.0};
+
+    WGPURenderPassDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &colorAttachment;
+    descriptor.depthStencilAttachment = nullptr;
+    descriptor.occlusionQuerySet = nullptr;
+    descriptor.timestampWrites = nullptr;
+
+    return wgpuCommandEncoderBeginRenderPass(commandEncoder, &descriptor);
+}
+
 WGPUComputePassEncoder createComputePass(WGPUCommandEncoder commandEncoder)
 {
     WGPUComputePassDescriptor descriptor;
@@ -2688,6 +2917,25 @@ WGPUSampler create3DNoiseSampler(WGPUDevice device)
     descriptor.addressModeW = WGPUAddressMode_Repeat;
     descriptor.magFilter = WGPUFilterMode_Linear;
     descriptor.minFilter = WGPUFilterMode_Linear;
+    descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    descriptor.lodMinClamp = 0.f;
+    descriptor.lodMaxClamp = 0.f;
+    descriptor.compare = WGPUCompareFunction_Undefined;
+    descriptor.maxAnisotropy = 1;
+
+    return wgpuDeviceCreateSampler(device, &descriptor);
+}
+
+WGPUSampler createTextSampler(WGPUDevice device)
+{
+    WGPUSamplerDescriptor descriptor;
+    descriptor.nextInChain = nullptr;
+    descriptor.label = nullptr;
+    descriptor.addressModeU = WGPUAddressMode_ClampToEdge;
+    descriptor.addressModeV = WGPUAddressMode_ClampToEdge;
+    descriptor.addressModeW = WGPUAddressMode_ClampToEdge;
+    descriptor.magFilter = WGPUFilterMode_Nearest;
+    descriptor.minFilter = WGPUFilterMode_Nearest;
     descriptor.mipmapFilter = WGPUMipmapFilterMode_Nearest;
     descriptor.lodMinClamp = 0.f;
     descriptor.lodMaxClamp = 0.f;
@@ -2883,4 +3131,45 @@ WGPUTextureView create3DNoiseTextureView(WGPUTexture texture)
     descriptor.aspect = WGPUTextureAspect_All;
 
     return wgpuTextureCreateView(texture, &descriptor);
+}
+
+WGPUTexture createFontTexture(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & path)
+{
+    auto imageData = glTF::loadImage(path);
+
+    WGPUTextureDescriptor textureDescriptor;
+    textureDescriptor.nextInChain = nullptr;
+    textureDescriptor.label = nullptr;
+    textureDescriptor.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    textureDescriptor.dimension = WGPUTextureDimension_2D;
+    textureDescriptor.size = {(std::uint32_t)imageData.width, (std::uint32_t)imageData.height, 1};
+    textureDescriptor.format = WGPUTextureFormat_R8Unorm;
+    textureDescriptor.mipLevelCount = 1;
+    textureDescriptor.sampleCount = 1;
+    textureDescriptor.viewFormatCount = 0;
+    textureDescriptor.viewFormats = nullptr;
+
+    auto texture = wgpuDeviceCreateTexture(device, &textureDescriptor);
+
+    WGPUImageCopyTexture imageCopyTexture;
+    imageCopyTexture.nextInChain = nullptr;
+    imageCopyTexture.texture = texture;
+    imageCopyTexture.mipLevel = 0;
+    imageCopyTexture.origin = {0, 0, 0};
+    imageCopyTexture.aspect = WGPUTextureAspect_All;
+
+    WGPUTextureDataLayout textureDataLayout;
+    textureDataLayout.nextInChain = nullptr;
+    textureDataLayout.offset = 0;
+    textureDataLayout.bytesPerRow = imageData.width;
+    textureDataLayout.rowsPerImage = imageData.height;
+
+    WGPUExtent3D writeSize;
+    writeSize.width = imageData.width;
+    writeSize.height = imageData.height;
+    writeSize.depthOrArrayLayers = 1;
+
+    wgpuQueueWriteTexture(queue, &imageCopyTexture, imageData.data.get(), imageData.width * imageData.height, &textureDataLayout, &writeSize);
+
+    return texture;
 }

@@ -17,9 +17,10 @@ int main(int argc, char ** argv)
     std::filesystem::path const sponzaPath = PROJECT_ROOT "/Sponza/Sponza.gltf";
     std::filesystem::path const sponzaLightsPath = PROJECT_ROOT "/Sponza/Sponza-lights.gltf";
     std::filesystem::path const waterNoiseTexture = PROJECT_ROOT "/water.png";
+    std::filesystem::path const fontTexture = PROJECT_ROOT "/font_9x12.png";
 
     Application application;
-    Engine engine(application.device(), application.queue(), noise3DPath);
+    Engine engine(application.device(), application.queue(), noise3DPath, fontTexture);
     engine.setEnvMap(dayEnvMapPath);
 
     std::vector<RenderObjectPtr> renderObjects;
@@ -58,12 +59,15 @@ int main(int argc, char ** argv)
     bool day = true;
     bool vsync = true;
     bool gravity = true;
+    bool water = true;
 
     auto lastFrameStart = std::chrono::high_resolution_clock::now();
 
     glm::vec3 shockCenter(0.f);
     glm::vec3 shockDirection(0.f, 0.f, 1.f);
     float shockDistance = 1e9f;
+
+    float averageFrameTime = 0.f;
 
     for (bool running = true; running;)
     {
@@ -115,6 +119,8 @@ int main(int argc, char ** argv)
             }
             if (event->key.keysym.scancode == SDL_SCANCODE_G)
                 gravity ^= true;
+            if (event->key.keysym.scancode == SDL_SCANCODE_T)
+                water ^= true;
             break;
         case SDL_KEYUP:
             keysDown.erase(event->key.keysym.scancode);
@@ -136,6 +142,8 @@ int main(int argc, char ** argv)
             shockDistance += sceneDiagonal * 0.4f * dt;
         }
         lastFrameStart = thisFrameStart;
+
+        averageFrameTime = glm::mix(averageFrameTime, dt, 0.25f);
 
         camera.update(dt, {
             .movingForward  = keysDown.contains(SDL_SCANCODE_W),
@@ -183,8 +191,25 @@ int main(int argc, char ** argv)
         settings.time = time;
         settings.dt = dt;
         settings.gravity = gravity;
+        settings.water = water;
 
-        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings);
+        std::string text =
+R"(Controls:
+  [WASD] - move
+  [Shift] - move fast
+  [Ctrl] - move slow
+  [Space] - pause
+  [N] - toggle day/night
+  [V] - toggle vsync
+  [T] - toggle water
+  [G] - toggle gravity
+  [F] - FUS DO RAH
+
+)";
+
+        text += std::to_string(static_cast<int>(std::round(1.f / averageFrameTime))) + " FPS\n";
+
+        engine.render(surfaceTexture, renderObjects, camera, sceneBbox, settings, text);
 
         application.present();
 

@@ -33,6 +33,12 @@ struct ClothEdge
     float padding1[3];
 };
 
+struct TextVertex
+{
+    glm::vec2 position;
+    glm::vec2 texcoord;
+};
+
 struct CameraUniform
 {
     glm::mat4 viewProjection;
@@ -89,6 +95,11 @@ struct WaterUniform
     float padding[1];
 };
 
+struct TextUniform
+{
+    glm::ivec2 viewportSize;
+};
+
 static constexpr std::size_t CLOTH_EDGES_PER_VERTEX = 8;
 
 glm::mat4 glToVkProjection(glm::mat4 matrix);
@@ -100,6 +111,7 @@ extern const char blurShadowShader[];
 extern const char simulateClothShader[];
 extern const char simulateWaterShader[];
 extern const char ldrShader[];
+extern const char textShader[];
 
 std::uint32_t minStorageBufferOffsetAlignment(WGPUDevice device);
 
@@ -117,6 +129,7 @@ WGPUBindGroupLayout createSimulateClothBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createWaterBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createSimulateWaterBindGroupLayout(WGPUDevice device);
 WGPUBindGroupLayout createHDRBindGroupLayout(WGPUDevice device);
+WGPUBindGroupLayout createTextBindGroupLayout(WGPUDevice device);
 
 WGPUPipelineLayout createPipelineLayout(WGPUDevice device, std::initializer_list<WGPUBindGroupLayout> bindGroupLayouts);
 
@@ -133,6 +146,7 @@ WGPUComputePipeline createSimulateClothCopyPipeline(WGPUDevice device, WGPUPipel
 WGPURenderPipeline createRenderWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPUComputePipeline createSimulateWaterPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule);
 WGPURenderPipeline createLDRPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat);
+WGPURenderPipeline createTextPipeline(WGPUDevice device, WGPUPipelineLayout pipelineLayout, WGPUShaderModule shaderModule, WGPUTextureFormat surfaceFormat);
 
 WGPUBuffer createUniformBuffer(WGPUDevice device, std::uint64_t size);
 WGPUBuffer createStorageBuffer(WGPUDevice device, std::uint64_t size);
@@ -149,6 +163,7 @@ WGPUBindGroup createWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGr
     WGPUTextureView waterDataTexture, WGPUBuffer uniformBuffer);
 WGPUBindGroup createSimulateWaterBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUTextureView input, WGPUTextureView output);
 WGPUBindGroup createHDRBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUTextureView input);
+WGPUBindGroup createTextBindGroup(WGPUDevice device, WGPUBindGroupLayout bindGroupLayout, WGPUBuffer uniformBuffer, WGPUTextureView fontTexture, WGPUSampler fontSampler);
 
 WGPUTextureView createTextureView(WGPUTexture texture, int level = 0);
 WGPUTextureView createTextureView(WGPUTexture texture, int level, WGPUTextureFormat format);
@@ -160,6 +175,7 @@ WGPURenderPassEncoder createWaterRenderPass(WGPUCommandEncoder commandEncoder, W
 WGPURenderPassEncoder createShadowRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView depthTarget);
 WGPURenderPassEncoder createEnvRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView colorTarget, WGPUTextureView resolveTarget);
 WGPURenderPassEncoder createLDRRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView target);
+WGPURenderPassEncoder createTextRenderPass(WGPUCommandEncoder commandEncoder, WGPUTextureView target);
 WGPUComputePassEncoder createComputePass(WGPUCommandEncoder commandEncoder);
 
 WGPUCommandBuffer commandEncoderFinish(WGPUCommandEncoder commandEncoder);
@@ -168,6 +184,7 @@ WGPUSampler createDefaultSampler(WGPUDevice device);
 WGPUSampler createShadowSampler(WGPUDevice device);
 WGPUSampler createEnvSampler(WGPUDevice device);
 WGPUSampler create3DNoiseSampler(WGPUDevice device);
+WGPUSampler createTextSampler(WGPUDevice device);
 
 WGPUTexture createWhiteTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture createShadowMapTexture(WGPUDevice device, std::uint32_t size);
@@ -175,3 +192,4 @@ WGPUTexture createShadowMapDepthTexture(WGPUDevice device, std::uint32_t size);
 WGPUTexture createStubEnvTexture(WGPUDevice device, WGPUQueue queue);
 WGPUTexture create3DNoiseTexture(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & path);
 WGPUTextureView create3DNoiseTextureView(WGPUTexture texture);
+WGPUTexture createFontTexture(WGPUDevice device, WGPUQueue queue, std::filesystem::path const & path);
