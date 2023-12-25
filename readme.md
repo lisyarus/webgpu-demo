@@ -1,3 +1,5 @@
+![](screenshot1.png)
+
 # About
 
 A demo WebGPU renderer written partially on streams at [twitch.tv/lisyarus](twitch.tv/lisyarus), mostly for me to get familiar with WebGPU.
