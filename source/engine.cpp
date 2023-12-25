@@ -22,7 +22,7 @@ struct Engine::Impl
     ~Impl();
 
     void setEnvMap(std::filesystem::path const & hdrImagePath);
-    void setWaterBbox(Box const & box);
+    void setWater(Box const & box, std::filesystem::path const & waterState);
     void render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings);
     std::vector<RenderObjectPtr> loadGLTF(std::filesystem::path const & assetPath);
 
@@ -475,7 +475,7 @@ void Engine::Impl::setEnvMap(std::filesystem::path const & hdrImagePath)
     });
 }
 
-void Engine::Impl::setWaterBbox(Box const & box)
+void Engine::Impl::setWater(Box const & box, std::filesystem::path const & waterState)
 {
     waterBbox_ = box;
 
@@ -583,16 +583,14 @@ void Engine::Impl::setWaterBbox(Box const & box)
         waterDataTextureView1_ = createTextureView(waterDataTexture1_);
         waterDataTextureView2_ = createTextureView(waterDataTexture2_);
 
-        auto image = glTF::loadImage(PROJECT_ROOT "/water.png");
+        auto image = glTF::loadImage(waterState);
 
         std::vector<float> pixels;
         for (int y = 0; y < waterCellCount_.y; ++y)
         {
             for (int x = 0; x < waterCellCount_.x; ++x)
             {
-                pixels.push_back(image.data.get()[y * waterCellCount_.x + x] / 255.f - 0.5f);
-//                auto p = gridVertices[y * waterCellCount_.x + x];
-//                pixels.back() = std::exp(-glm::dot(p, p)) * std::sin(glm::length(p) * 10.f);
+                pixels.push_back(image.data.get()[y * image.width + x] / 255.f - 0.5f);
                 pixels.push_back(0.0f);
             }
         }
@@ -1719,9 +1717,9 @@ void Engine::setEnvMap(std::filesystem::path const & hdrImagePath)
     pimpl_->setEnvMap(hdrImagePath);
 }
 
-void Engine::setWaterBbox(Box const & box)
+void Engine::setWater(Box const & box, std::filesystem::path const & waterState)
 {
-    pimpl_->setWaterBbox(box);
+    pimpl_->setWater(box, waterState);
 }
 
 void Engine::render(WGPUTexture target, std::vector<RenderObjectPtr> const & objects, Camera const & camera, Box const & sceneBbox, Settings const & settings)

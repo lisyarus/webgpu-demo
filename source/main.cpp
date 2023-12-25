@@ -16,6 +16,7 @@ int main(int argc, char ** argv)
     std::filesystem::path const nightEnvMapPath = PROJECT_ROOT "/satara_night_4k.hdr";
     std::filesystem::path const sponzaPath = PROJECT_ROOT "/Sponza/Sponza.gltf";
     std::filesystem::path const sponzaLightsPath = PROJECT_ROOT "/Sponza/Sponza-lights.gltf";
+    std::filesystem::path const waterNoiseTexture = PROJECT_ROOT "/water.png";
 
     Application application;
     Engine engine(application.device(), application.queue(), noise3DPath);
@@ -36,7 +37,7 @@ int main(int argc, char ** argv)
     }
 
     auto sceneBbox = engine.bbox(renderObjects);
-    engine.setWaterBbox(sceneBbox);
+    engine.setWater(sceneBbox, waterNoiseTexture);
 
     Camera camera;
     camera.move({-9.f, 1.5f, -0.25f});
